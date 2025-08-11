@@ -1,0 +1,24 @@
+[project]
+name = "template-bot"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Not That Droids",email = "dv.tarkov@google.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aiogram (>=3.21.0,<4.0.0)",
+    "jinja2 (>=3.1.6,<4.0.0)",
+    "sqlalchemy (>=2.0.42,<3.0.0)",
+    "alembic (>=1.16.4,<2.0.0)",
+    "aiosqlite (>=0.21.0,<0.22.0)",
+    "asyncpg (>=0.30.0,<0.31.0)",
+    "pydantic (>=2.11.7,<3.0.0)",
+    "python-dotenv (>=1.1.1,<2.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

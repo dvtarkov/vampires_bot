@@ -1,0 +1,37 @@
+<b>📊 Профиль игрока</b>
+
+<b>👤 Имя:</b> {{ profile.name }}
+<b>🏳️ Фракция:</b> {{ profile.faction }}
+<b>🧠 Идеология:</b> {{ profile.ideology_value }} ({{ profile.ideology_label }})
+{{ profile.ideology_bar }}
+
+<b>🧱 Ресурсы:</b>
+💪 force: <b>{{ profile.resources.force }}</b>
+💰 money: <b>{{ profile.resources.money }}</b>
+🪙 influence: <b>{{ profile.resources.influence }}</b>
+🧠 information: <b>{{ profile.resources.information }}</b>
+
+<b>📝 Заявки:</b>
+📥 Доступно заявок: <b>{{ profile.applications.available }}</b>/<b>{{ profile.applications.max_available }}</b>
+⏳ Следующее обновление: через <b>{{ profile.applications.next_update_minutes }}</b> мин.
+
+<b>🏛 Контролируемые районы:</b>
+{% if profile.districts.has_any -%}
+Всего: <b>{{ profile.districts.count }}</b>
+{%- else -%}
+Нет
+{%- endif %}
+
+<b>🧰 Действия:</b>
+⏱ В ожидании: <b>{{ profile.actions_stats.pending }}</b>
+✅ Выполнено: <b>{{ profile.actions_stats.done }}</b>
+❌ Не удалось: <b>{{ profile.actions_stats.failed }}</b>
+
+<b>🕘 Последние действия:</b>
+{% if profile.recent_actions.has_any -%}
+{% for a in profile.recent_actions -%}
+• {{ a }}
+{% endfor %}
+{%- else -%}
+Нет
+{%- endif %}

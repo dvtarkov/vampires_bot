@@ -1,0 +1,401 @@
+# db/models.py
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Optional, Sequence, List
+
+from sqlalchemy import (
+    BigInteger,
+    String,
+    DateTime,
+    ForeignKey,
+    select,
+    update,
+    delete,
+    func,
+    Index, Enum, Integer, CheckConstraint, Float, UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from db.session import Base
+from enum import Enum as PyEnum
+
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+# ===========================
+#           User
+# ===========================
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
+
+    username: Mapped[Optional[str]] = mapped_column(String(255))
+    first_name: Mapped[Optional[str]] = mapped_column(String(255))
+    last_name: Mapped[Optional[str]] = mapped_column(String(255))
+    language_code: Mapped[Optional[str]] = mapped_column(String(16))
+
+    money: Mapped[int] = mapped_column(default=0, nullable=False)
+    influence: Mapped[int] = mapped_column(default=0, nullable=False)
+    information: Mapped[int] = mapped_column(default=0, nullable=False)
+    force: Mapped[int] = mapped_column(default=0, nullable=False)
+
+    # НОВОЕ
+    ideology: Mapped[int] = mapped_column(Integer, default=0, nullable=False)             # -5..+5
+    faction: Mapped[Optional[str]] = mapped_column(String(64))                             # простой текст
+    available_actions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # сколько слотов
+    max_available_actions: Mapped[int] = mapped_column(Integer, default=5, nullable=True)  # сколько слотов
+    actions_refresh_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Один-ко-многим: User -> District
+    districts: Mapped[List["District"]] = relationship(
+        "District",
+        back_populates="owner",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,  # работает полноценно на Postgres (FK ON DELETE CASCADE)
+    )
+
+    actions: Mapped[List["Action"]] = relationship(
+        "Action", back_populates="owner", lazy="selectin",
+        cascade="all, delete-orphan", passive_deletes=True
+    )
+
+    __table_args__ = (
+        CheckConstraint("ideology >= -5 AND ideology <= 5", name="ck_users_ideology_range"),
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=now_utc,
+        onupdate=now_utc,
+        nullable=False,
+    )
+
+    # ===== CRUD =====
+    @classmethod
+    async def create(
+        cls,
+        session,
+        tg_id: int,
+        username: Optional[str] = None,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
+        language_code: Optional[str] = None,
+        **extra,
+    ) -> "User":
+        user = cls(
+            tg_id=tg_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            language_code=language_code,
+            **extra,
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        return user
+
+    @classmethod
+    async def get_by_tg_id(cls, session, tg_id: int) -> Optional["User"]:
+        res = await session.execute(select(cls).where(cls.tg_id == tg_id))
+        return res.scalars().first()
+
+    @classmethod
+    async def get_all(cls, session) -> Sequence["User"]:
+        res = await session.execute(select(cls))
+        return res.scalars().all()
+
+    @classmethod
+    async def update_by_tg_id(cls, session, tg_id: int, **kwargs) -> bool:
+        kwargs["updated_at"] = now_utc()
+        res = await session.execute(
+            update(cls)
+            .where(cls.tg_id == tg_id)
+            .values(**kwargs)
+            .execution_options(synchronize_session="fetch")
+        )
+        await session.commit()
+        return (res.rowcount or 0) > 0
+
+    @classmethod
+    async def delete_by_tg_id(cls, session, tg_id: int) -> bool:
+        res = await session.execute(delete(cls).where(cls.tg_id == tg_id))
+        await session.commit()
+        return (res.rowcount or 0) > 0
+
+    # ===== Helpers =====
+    @classmethod
+    async def get_or_create(cls, session, tg_id: int, **defaults) -> "User":
+        user = await cls.get_by_tg_id(session, tg_id)
+        if user:
+            return user
+        return await cls.create(session, tg_id=tg_id, **defaults)
+
+    @classmethod
+    async def count_districts(cls, session, user_id: int) -> int:
+        res = await session.execute(select(func.count(District.id)).where(District.owner_id == user_id))
+        return int(res.scalar() or 0)
+
+
+# Индекс на username для быстрых фильтров (опционально)
+Index("ix_users_username", User.username)
+
+# ===========================
+#         Districts
+# ===========================
+
+
+class ControlLevel(PyEnum):
+    NONE = "NONE"
+    MINIMAL = "MINIMAL"
+    PARTIAL = "PARTIAL"
+    SIGNIFICANT = "SIGNIFICANT"
+    FULL = "FULL"
+
+
+class District(Base):
+    __tablename__ = "districts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    # Название района
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Владелец
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False
+    )
+    owner: Mapped["User"] = relationship(
+        "User", back_populates="districts", lazy="selectin"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, nullable=False
+    )
+
+    # ==== Новые поля из UI ====
+
+    # Очки контроля (Your Control: 0 points)
+    control_points: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Уровень контроля (Level: ControlLevel.MINIMAL)
+    control_level: Mapped[ControlLevel] = mapped_column(
+        Enum(ControlLevel, name="control_level_enum"),
+        default=ControlLevel.MINIMAL,
+        nullable=False,
+    )
+
+    # Множитель ресурсов (Resource Multiplier: 40.0% => 0.4)
+    resource_multiplier: Mapped[float] = mapped_column(
+        Float, default=0.40, nullable=False
+    )
+
+    # Базовые ресурсы (Base Resources)
+    base_money: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
+    base_influence: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    base_information: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    base_force: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    __table_args__ = (
+        # Один и тот же владелец не может иметь два района с одинаковым именем
+        UniqueConstraint("owner_id", "name", name="uq_district_owner_name"),
+        Index("ix_district_owner_name", "owner_id", "name"),
+    )
+
+    # ===== CRUD =====
+    @classmethod
+    async def create(
+        cls,
+        session,
+        name: str,
+        owner_id: int,
+        *,
+        control_points: int = 0,
+        control_level: ControlLevel = ControlLevel.MINIMAL,
+        resource_multiplier: float = 0.40,
+        base_money: int = 100,
+        base_influence: int = 10,
+        base_information: int = 5,
+        base_force: int = 0,
+    ) -> "District":
+        obj = cls(
+            name=name,
+            owner_id=owner_id,
+            control_points=control_points,
+            control_level=control_level,
+            resource_multiplier=resource_multiplier,
+            base_money=base_money,
+            base_influence=base_influence,
+            base_information=base_information,
+            base_force=base_force,
+        )
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+        return obj
+
+    @classmethod
+    async def get_by_id(cls, session, district_id: int) -> "District | None":
+        res = await session.execute(select(cls).where(cls.id == district_id))
+        return res.scalars().first()
+
+    @classmethod
+    async def get_by_owner(cls, session, owner_id: int):
+        res = await session.execute(
+            select(cls).where(cls.owner_id == owner_id).order_by(cls.id)
+        )
+        return res.scalars().all()
+
+    @classmethod
+    async def rename(cls, session, district_id: int, new_name: str) -> "District | None":
+        obj = await cls.get_by_id(session, district_id)
+        if not obj:
+            return None
+        obj.name = new_name
+        await session.commit()
+        await session.refresh(obj)
+        return obj
+
+    @classmethod
+    async def reassign_owner(cls, session, district_id: int, new_owner_id: int) -> "District | None":
+        obj = await cls.get_by_id(session, district_id)
+        if not obj:
+            return None
+        obj.owner_id = new_owner_id
+        await session.commit()
+        await session.refresh(obj)
+        return obj
+
+    @classmethod
+    async def update_control(
+        cls,
+        session,
+        district_id: int,
+        *,
+        control_points: int | None = None,
+        control_level: ControlLevel | None = None,
+        resource_multiplier: float | None = None,
+    ) -> "District | None":
+        obj = await cls.get_by_id(session, district_id)
+        if not obj:
+            return None
+        if control_points is not None:
+            obj.control_points = control_points
+        if control_level is not None:
+            obj.control_level = control_level
+        if resource_multiplier is not None:
+            obj.resource_multiplier = resource_multiplier
+        await session.commit()
+        await session.refresh(obj)
+        return obj
+
+    @classmethod
+    async def set_base_resources(
+        cls,
+        session,
+        district_id: int,
+        *,
+        money: int | None = None,
+        influence: int | None = None,
+        information: int | None = None,
+        force: int | None = None,
+    ) -> "District | None":
+        obj = await cls.get_by_id(session, district_id)
+        if not obj:
+            return None
+        if money is not None:
+            obj.base_money = money
+        if influence is not None:
+            obj.base_influence = influence
+        if information is not None:
+            obj.base_information = information
+        if force is not None:
+            obj.base_force = force
+        await session.commit()
+        await session.refresh(obj)
+        return obj
+
+    @classmethod
+    async def delete(cls, session, district_id: int) -> bool:
+        res = await session.execute(delete(cls).where(cls.id == district_id))
+        await session.commit()
+        return (res.rowcount or 0) > 0
+
+    # ===== Вспомогательное =====
+    def effective_resources(self) -> dict[str, int]:
+        """Рассчитать ресурсы с учётом мультипликатора."""
+        mul = float(self.resource_multiplier)
+        return {
+            "money": int(round(self.base_money * mul)),
+            "influence": int(round(self.base_influence * mul)),
+            "information": int(round(self.base_information * mul)),
+            "force": int(round(self.base_force * mul)),
+        }
+
+# ===========================
+#         Action
+# ===========================
+
+class ActionStatus(PyEnum):
+    PENDING = "pending"
+    DONE = "done"
+    FAILED = "failed"
+
+
+class Action(Base):
+    __tablename__ = "actions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    # произвольный тип/код действия (например "recon", "attack")
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    # опциональное краткое описание
+    title: Mapped[Optional[str]] = mapped_column(String(255))
+    status: Mapped[ActionStatus] = mapped_column(Enum(ActionStatus), default=ActionStatus.PENDING, nullable=False)
+
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    owner: Mapped["User"] = relationship("User", back_populates="actions", lazy="selectin")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False)
+
+    # простые CRUD
+    @classmethod
+    async def create(cls, session, *, owner_id: int, kind: str, title: Optional[str] = None) -> "Action":
+        obj = cls(owner_id=owner_id, kind=kind, title=title)
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+        return obj
+
+    @classmethod
+    async def get_by_id(cls, session, action_id: int) -> Optional["Action"]:
+        res = await session.execute(select(cls).where(cls.id == action_id))
+        return res.scalars().first()
+
+    @classmethod
+    async def by_owner(cls, session, owner_id: int) -> Sequence["Action"]:
+        res = await session.execute(select(cls).where(cls.owner_id == owner_id).order_by(cls.id.desc()))
+        return res.scalars().all()
+
+    @classmethod
+    async def set_status(cls, session, action_id: int, status: ActionStatus) -> bool:
+        res = await session.execute(
+            update(cls).where(cls.id == action_id).values(status=status, updated_at=now_utc())
+        )
+        await session.commit()
+        return (res.rowcount or 0) > 0
+
+    @classmethod
+    async def delete(cls, session, action_id: int) -> bool:
+        res = await session.execute(delete(cls).where(cls.id == action_id))
+        await session.commit()
+        return (res.rowcount or 0) > 0
