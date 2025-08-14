@@ -19,8 +19,7 @@ RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 # Только манифесты — чтобы кэш устанавливаемых пакетов не сбивался
 COPY pyproject.toml poetry.lock* ./
 
-# Прод-зависимости (без dev)
-RUN poetry install --no-root --no-interaction --no-ansi --only main
+RUN poetry install --no-root --no-interaction --no-ansi
 
 # ====== RUNTIME STAGE ======
 FROM python:3.12-slim AS runtime
