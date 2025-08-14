@@ -8,7 +8,7 @@ on:
   workflow_dispatch:  # <--- Добавляет кнопку "Run workflow"
 
 env:
-  IMAGE_NAME: 4tt-new-backend
+  IMAGE_NAME: vampires-bot
 
 jobs:
   build-and-push:
