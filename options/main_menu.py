@@ -1,6 +1,8 @@
 from aiogram import types
+from aiogram.fsm.context import FSMContext
 
 from screens.actions import ActionsScreen
+from screens.district_list import DistrictList
 from screens.profile import ProfileScreen
 from .registry import option
 from screens.main_menu import MainMenuScreen
@@ -12,9 +14,12 @@ async def main_menu_actions(cb: types.CallbackQuery):
     await cb.answer()
 
 
-@option("main_menu_map")
-async def main_menu_map(cb: types.CallbackQuery):
-    await cb.answer("Карта сейчас недоступна 🗺️")
+@option("main_menu_map")  # или своя опция
+async def open_districts(cb: types.CallbackQuery, state: FSMContext, **_):
+    # сбросим индекс на 0 при первом заходе (необязательно)
+    await state.update_data(district_list_index=0)
+    await DistrictList().run(message=cb.message, actor=cb.from_user, state=state)
+    await cb.answer()
 
 
 @option("main_menu_news")

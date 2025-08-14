@@ -1,0 +1,48 @@
+{% set status_emoji = {
+  "pending": "🟡",
+  "done":    "✅",
+  "failed":  "❌",
+} %}
+
+{% macro res_row(icon, label, value) -%}
+{{ icon }} {{ label }}: <b>{{ value|default(0) }}</b>
+{%- endmacro %}
+
+<b>🛡️ Действие: Защита</b> <i>(#{{ action.id }})</i>
+Статус: {{ status_emoji.get(action.status|default("pending"), "🟡") }} <b>{{ action.status|upper }}</b>
+Тип: <b>{{ action.type|upper }}</b>
+
+{% if action.title %}
+<b>Название:</b> {{ action.title }}
+{% endif %}
+
+<b>Инициатор:</b> {{ action.owner.name|default("—") }}
+
+{% if action.district %}
+<b>Район:</b> {{ action.district.name }}
+{% else %}
+<b>Район:</b> <i>не выбран</i>
+{% endif %}
+
+<b>Время:</b> создано {{ action.created_human|default("—") }}, обновлено {{ action.updated_human|default("—") }}
+
+{% set r = action.resources or {} %}
+{% if (r.force|default(0)) or (r.money|default(0)) or (r.influence|default(0)) or (r.information|default(0)) %}
+<b>🔧 Ресурсы:</b>
+{{ res_row("💪", "force", r.force) }}
+{{ res_row("💰", "money", r.money) }}
+{{ res_row("🪙", "influence", r.influence) }}
+{{ res_row("🧠", "information", r.information) }}
+{% else %}
+<b>🔧 Ресурсы:</b> всё по нулям
+{% endif %}
+
+{% if action.support and action.support.is_support %}
+<b>🤝 Это экшен-помощь</b>
+Базовое действие: #{{ action.support.parent_id }} — {{ action.support.parent_title|default("без названия") }}
+{% elif action.type == "collective" %}
+<b>👥 Коллективный экшен</b>
+Присоединившихся: <b>{{ (action.support and action.support.children_count) or 0 }}</b>
+{% endif %}
+
+<i>Используйте кнопки ниже, чтобы настраивать ресурсы и выбрать район.</i>

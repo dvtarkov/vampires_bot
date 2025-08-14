@@ -1,16 +1,20 @@
 # keyboards/renderer.py
 import os
-from typing import Tuple, List, Dict, Any, Iterable
+from typing import Tuple, List, Dict, Any, Iterable, Union
+from urllib.parse import urlencode
+
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 from aiogram.types import (
     InlineKeyboardMarkup, ReplyKeyboardMarkup,
     InlineKeyboardButton, KeyboardButton,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+
 from config import load_config
 from .spec import KeyboardSpec, RowOrName
 
 _cfg = load_config()
+
 
 class KeyboardRenderer:
     def __init__(self, template_root: str | None = None):
@@ -26,7 +30,7 @@ class KeyboardRenderer:
     def _render_button_text(self, spec: KeyboardSpec, button_name: str, context: Dict[str, Any]) -> str:
         loc = (context.get("localization") or _cfg.default_localization).lower()
         localized_dir = os.path.join(self.template_root, loc, "keyboards", spec.name)
-        global_dir    = os.path.join(self.template_root, "keyboards", spec.name)
+        global_dir = os.path.join(self.template_root, "keyboards", spec.name)
 
         candidates = [button_name, f"{button_name}.j2", f"{button_name}.txt.j2"]
 
@@ -48,7 +52,7 @@ class KeyboardRenderer:
 
         return button_name.replace("_", " ").title()  # fallback
 
-    # --- NEW: нормализация опций в явные ряды ---
+    # --- нормализация опций в явные ряды ---
     def _options_to_rows(self, options: List[RowOrName], max_in_row: int) -> List[List[str]]:
         rows: List[List[str]] = []
         pending: List[str] = []
@@ -57,15 +61,13 @@ class KeyboardRenderer:
             nonlocal pending
             if not pending:
                 return
-            # разбиваем pending батчами max_in_row
             for i in range(0, len(pending), max_in_row):
-                rows.append(pending[i:i+max_in_row])
+                rows.append(pending[i:i + max_in_row])
             pending = []
 
         for item in options:
             if isinstance(item, list):
                 flush_pending()
-                # пустые списки игнорируем
                 if item:
                     rows.append(item)
             else:
@@ -73,6 +75,21 @@ class KeyboardRenderer:
 
         flush_pending()
         return rows
+
+    # --- СБОРКА callback_data с параметрами ---
+    def _build_callback_data(self, spec: KeyboardSpec, option_name: str) -> str:
+        base = f"{spec.name}_{option_name}"
+        params = spec.button_params.get(option_name) if hasattr(spec, "button_params") and spec.button_params else None
+        if not params:
+            return base
+        qs = urlencode(params, doseq=True)
+        data = f"{base}?{qs}"
+        # Telegram лимит ~64 байта; по желанию можно обрезать/журналировать
+        if len(data.encode("utf-8")) > 64:
+            # стараемся ужать ключи: оставим только base без параметров
+            # (или здесь можно кидать исключение/логировать warning)
+            return base
+        return data
 
     def build(self, spec: KeyboardSpec, common_context: Dict[str, Any]) -> InlineKeyboardMarkup | ReplyKeyboardMarkup:
         ctx = {**common_context, **spec.context}
@@ -100,24 +117,22 @@ class KeyboardRenderer:
                 buttons = [
                     InlineKeyboardButton(
                         text=text_map[name],
-                        callback_data=f"{spec.name}_{name}"
+                        callback_data=self._build_callback_data(spec, name),
                     )
                     for name in row
                 ]
                 builder.row(*buttons)
-            markup = builder.as_markup()
-            return markup
+            return builder.as_markup()
 
         # reply
         rbuilder = ReplyKeyboardBuilder()
         for row in rows:
             buttons = [KeyboardButton(text=text_map[name]) for name in row]
             rbuilder.row(*buttons)
-        rmarkup = rbuilder.as_markup(
+        return rbuilder.as_markup(
             resize_keyboard=spec.params.resize_keyboard,
             one_time_keyboard=spec.params.one_time_keyboard,
             is_persistent=spec.params.is_persistent,
             selective=spec.params.selective,
             input_field_placeholder=spec.params.input_field_placeholder,
         )
-        return rmarkup

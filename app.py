@@ -7,6 +7,7 @@ from routes import router as main_router
 from routes.options import router as options_router
 from options.registry import load_all_options
 from middlewares.user_registration import UserRegistrationMiddleware
+from text_handlers import load_all_text_handlers, _REGISTRY
 
 config = load_config()
 setup_logging(level=config.log_level)
@@ -16,6 +17,8 @@ async def main():
     logging.info("Starting bot…")
     # 1) грузим все опции, чтобы сработали декораторы @option
     load_all_options()
+    load_all_text_handlers("text_handlers")  # <-- ВАЖНО: до start_polling
+    logging.info("Text handlers at start: %s", list(_REGISTRY.keys()))
 
     bot = Bot(token=config.bot_token)
     dp = Dispatcher()

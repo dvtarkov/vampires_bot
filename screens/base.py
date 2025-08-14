@@ -1,9 +1,16 @@
+# screens/base.py (замените _render целиком)
 import os
+import logging
 from typing import Any, Dict, Tuple, Optional
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
+from aiogram.exceptions import TelegramBadRequest
+
 from config import load_config
 from keyboards.renderer import KeyboardRenderer
 from keyboards.spec import KeyboardSpec
+from services.message_store import get_message, set_message, clear_message
+from utils.render import content_hash
+from aiogram import types
 
 _config = load_config()
 _keyboard_renderer = KeyboardRenderer()
@@ -52,32 +59,76 @@ class BaseScreen:
 
         rendered = template.render(**kwargs)
 
+        # Клавиатура (если задали спецификацию)
         reply_markup = kwargs.get("reply_markup")
-        keyboard_spec = kwargs.get("keyboard")
-
+        keyboard_spec: KeyboardSpec | None = kwargs.get("keyboard")
         if keyboard_spec is not None:
             reply_markup = _keyboard_renderer.build(keyboard_spec, kwargs)
 
-        message = kwargs.get("message")
-        if message is not None and hasattr(message, "answer"):
-            send_kwargs = {
-                "parse_mode": "HTML",
-                "disable_web_page_preview": kwargs.get("disable_web_page_preview", True),
-            }
+        message: types.Message | None = kwargs.get("message")
+        if message is None or not hasattr(message, "answer"):
+            return {"rendered_text": rendered, "reply_markup": reply_markup}
 
-            # ВАЖНО: прикрепляем то, что построили (даже если в kwargs нет reply_markup)
-            if reply_markup is not None:
-                import logging
-                logging.info("Sending with reply_markup=%s", type(reply_markup).__name__)
-                send_kwargs["reply_markup"] = reply_markup
+        # -------- РЕЖИМЫ ОТПРАВКИ / РЕДАКТИРОВАНИЯ ----------
+        render_kind: str = kwargs.get("render_kind", "main")  # "main" | "notice"
+        force_new: bool = kwargs.get("force_new", False)
+        no_store: bool = kwargs.get("no_store", False)
+        persist_key: str = kwargs.get("persist_key", "main")
+        max_age: int = int(kwargs.get("allow_edit_age_sec", 172800))  # 48h
 
-            # Если явно передали parse_mode/reply_parameters — они перекроют дефолты
-            for k in ("reply_parameters", "parse_mode"):
-                if k in kwargs:
-                    send_kwargs[k] = kwargs[k]
+        chat_id = message.chat.id
+        send_kwargs = {
+            "parse_mode": kwargs.get("parse_mode", "HTML"),
+            "disable_web_page_preview": kwargs.get("disable_web_page_preview", True),
+        }
+        if reply_markup is not None:
+            logging.info("Sending with reply_markup=%s", type(reply_markup).__name__)
+            send_kwargs["reply_markup"] = reply_markup
+        if "reply_parameters" in kwargs:
+            send_kwargs["reply_parameters"] = kwargs["reply_parameters"]
 
+        # Хэш для идемпотентности
+        c_hash = content_hash(rendered, reply_markup)
+
+        # Нотификация — всегда новое сообщение, не трогаем main
+        if render_kind == "notice" or force_new:
             sent = await message.answer(rendered, **send_kwargs)
+            if not no_store:
+                set_message(chat_id, persist_key, render_kind, sent.message_id, c_hash)
             return {"rendered_text": rendered, "_result": sent, "reply_markup": reply_markup}
+
+        # Попытка редактирования "main"
+        stored = get_message(chat_id, persist_key, "main")
+        logging.info(f"persist_key={persist_key}, stored={stored}")
+        if stored:
+            last_id, ts, prev_hash = stored
+            # если контент не поменялся — ничего не делаем
+            if prev_hash == c_hash:
+                logging.info("Skip edit: content not changed (%s)", persist_key)
+                return {"rendered_text": rendered, "_result": None, "reply_markup": reply_markup}
+
+            age_ok = (ts is None) or ((__import__("time").time() - ts) <= max_age)
+            if age_ok:
+                try:
+                    edited = await message.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=last_id,
+                        text=rendered,
+                        parse_mode=send_kwargs["parse_mode"],
+                        disable_web_page_preview=send_kwargs["disable_web_page_preview"],
+                        reply_markup=send_kwargs.get("reply_markup"),
+                    )
+                    set_message(chat_id, persist_key, "main", edited.message_id, c_hash)
+                    return {"rendered_text": rendered, "_result": edited, "reply_markup": reply_markup}
+                except TelegramBadRequest as e:
+                    # Частые случаи: "message is not modified", "message to edit not found", "message can't be edited"
+                    logging.warning("Edit failed (%s), fallback to send: %s", persist_key, e)
+
+        # Если нечего редактировать или не вышло — отправляем новое и сохраняем
+        sent = await message.answer(rendered, **send_kwargs)
+        if not no_store:
+            set_message(chat_id, persist_key, "main", sent.message_id, c_hash)
+        return {"rendered_text": rendered, "_result": sent, "reply_markup": reply_markup}
 
     async def _post_render(self, *args: Any, **kwargs: Any) -> Optional[Any]:
         return None

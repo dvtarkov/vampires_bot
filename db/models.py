@@ -37,6 +37,9 @@ class User(Base):
     username: Mapped[Optional[str]] = mapped_column(String(255))
     first_name: Mapped[Optional[str]] = mapped_column(String(255))
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
+
+    in_game_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     language_code: Mapped[Optional[str]] = mapped_column(String(16))
 
     money: Mapped[int] = mapped_column(default=0, nullable=False)
@@ -45,8 +48,8 @@ class User(Base):
     force: Mapped[int] = mapped_column(default=0, nullable=False)
 
     # НОВОЕ
-    ideology: Mapped[int] = mapped_column(Integer, default=0, nullable=False)             # -5..+5
-    faction: Mapped[Optional[str]] = mapped_column(String(64))                             # простой текст
+    ideology: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # -5..+5
+    faction: Mapped[Optional[str]] = mapped_column(String(64))  # простой текст
     available_actions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # сколько слотов
     max_available_actions: Mapped[int] = mapped_column(Integer, default=5, nullable=True)  # сколько слотов
     actions_refresh_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -80,14 +83,14 @@ class User(Base):
     # ===== CRUD =====
     @classmethod
     async def create(
-        cls,
-        session,
-        tg_id: int,
-        username: Optional[str] = None,
-        first_name: Optional[str] = None,
-        last_name: Optional[str] = None,
-        language_code: Optional[str] = None,
-        **extra,
+            cls,
+            session,
+            tg_id: int,
+            username: Optional[str] = None,
+            first_name: Optional[str] = None,
+            last_name: Optional[str] = None,
+            language_code: Optional[str] = None,
+            **extra,
     ) -> "User":
         user = cls(
             tg_id=tg_id,
@@ -146,6 +149,7 @@ class User(Base):
 
 # Индекс на username для быстрых фильтров (опционально)
 Index("ix_users_username", User.username)
+
 
 # ===========================
 #         Districts
@@ -214,18 +218,18 @@ class District(Base):
     # ===== CRUD =====
     @classmethod
     async def create(
-        cls,
-        session,
-        name: str,
-        owner_id: int,
-        *,
-        control_points: int = 0,
-        control_level: ControlLevel = ControlLevel.MINIMAL,
-        resource_multiplier: float = 0.40,
-        base_money: int = 100,
-        base_influence: int = 10,
-        base_information: int = 5,
-        base_force: int = 0,
+            cls,
+            session,
+            name: str,
+            owner_id: int,
+            *,
+            control_points: int = 0,
+            control_level: ControlLevel = ControlLevel.MINIMAL,
+            resource_multiplier: float = 0.40,
+            base_money: int = 100,
+            base_influence: int = 10,
+            base_information: int = 5,
+            base_force: int = 0,
     ) -> "District":
         obj = cls(
             name=name,
@@ -277,13 +281,13 @@ class District(Base):
 
     @classmethod
     async def update_control(
-        cls,
-        session,
-        district_id: int,
-        *,
-        control_points: int | None = None,
-        control_level: ControlLevel | None = None,
-        resource_multiplier: float | None = None,
+            cls,
+            session,
+            district_id: int,
+            *,
+            control_points: int | None = None,
+            control_level: ControlLevel | None = None,
+            resource_multiplier: float | None = None,
     ) -> "District | None":
         obj = await cls.get_by_id(session, district_id)
         if not obj:
@@ -300,14 +304,14 @@ class District(Base):
 
     @classmethod
     async def set_base_resources(
-        cls,
-        session,
-        district_id: int,
-        *,
-        money: int | None = None,
-        influence: int | None = None,
-        information: int | None = None,
-        force: int | None = None,
+            cls,
+            session,
+            district_id: int,
+            *,
+            money: int | None = None,
+            influence: int | None = None,
+            information: int | None = None,
+            force: int | None = None,
     ) -> "District | None":
         obj = await cls.get_by_id(session, district_id)
         if not obj:
@@ -341,9 +345,16 @@ class District(Base):
             "force": int(round(self.base_force * mul)),
         }
 
+
 # ===========================
 #         Action
 # ===========================
+
+class ActionType(PyEnum):
+    INDIVIDUAL = "individual"
+    SUPPORT = "support"
+    COLLECTIVE = "collective"
+
 
 class ActionStatus(PyEnum):
     PENDING = "pending"
@@ -355,22 +366,101 @@ class Action(Base):
     __tablename__ = "actions"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    # произвольный тип/код действия (например "recon", "attack")
     kind: Mapped[str] = mapped_column(String(64), nullable=False)
-    # опциональное краткое описание
     title: Mapped[Optional[str]] = mapped_column(String(255))
-    status: Mapped[ActionStatus] = mapped_column(Enum(ActionStatus), default=ActionStatus.PENDING, nullable=False)
+    status: Mapped[ActionStatus] = mapped_column(
+        Enum(ActionStatus, name="action_status_enum"),
+        default=ActionStatus.PENDING,
+        nullable=False,
+    )
 
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    # Владелец
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False
+    )
     owner: Mapped["User"] = relationship("User", back_populates="actions", lazy="selectin")
 
+    # (NEW) Необязательный район
+    district_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("districts.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True
+    )
+    district: Mapped[Optional["District"]] = relationship("District", lazy="selectin")
+
+    # (NEW) Тип экшена
+    type: Mapped[ActionType] = mapped_column(
+        Enum(ActionType, name="action_type_enum"),
+        default=ActionType.INDIVIDUAL,
+        nullable=False
+    )
+
+    # (NEW) Self-FK для поддержки
+    parent_action_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("actions.id", ondelete="CASCADE"),
+        index=True,
+        nullable=True
+    )
+    parent_action: Mapped[Optional["Action"]] = relationship(
+        "Action",
+        remote_side="Action.id",
+        back_populates="support_actions",
+        lazy="selectin"
+    )
+    support_actions: Mapped[List["Action"]] = relationship(
+        "Action",
+        back_populates="parent_action",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+
+    # (NEW) Ресурсы
+    force: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    money: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    influence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    information: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=now_utc,
+        onupdate=now_utc,
+        nullable=False
+    )
 
     # простые CRUD
     @classmethod
-    async def create(cls, session, *, owner_id: int, kind: str, title: Optional[str] = None) -> "Action":
-        obj = cls(owner_id=owner_id, kind=kind, title=title)
+    async def create(
+            cls,
+            session,
+            *,
+            owner_id: int,
+            kind: str,
+            title: Optional[str] = None,
+            district_id: Optional[int] = None,
+            type: ActionType = ActionType.INDIVIDUAL,
+            parent_action_id: Optional[int] = None,
+            status: ActionStatus = ActionStatus.PENDING,
+            force: int = 0,
+            money: int = 0,
+            influence: int = 0,
+            information: int = 0
+    ) -> "Action":
+        obj = cls(
+            owner_id=owner_id,
+            kind=kind,
+            title=title,
+            district_id=district_id,
+            type=type,
+            parent_action_id=parent_action_id,
+            status=status,
+            force=force,
+            money=money,
+            influence=influence,
+            information=information
+        )
         session.add(obj)
         await session.commit()
         await session.refresh(obj)

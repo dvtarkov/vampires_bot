@@ -1,0 +1,16 @@
+{% if not district -%}
+<b>🏛️ Районы не найдены.</b>
+Добавьте район, чтобы начать управление.
+{%- else -%}
+<b>🏛️ {{ district.name }} ({{ info.index }}/{{ info.count }})</b>
+
+Your Control: <b>{{ district.control_points }}</b> points
+Level: <b>{{ district.control_level.name }}</b>
+Resource Multiplier: <b>{{ '%.1f' % (district.resource_multiplier * 100) }}%</b>
+
+<b>Base Resources:</b>
+money: <b>{{ district.base_money }}</b>
+influence: <b>{{ district.base_influence }}</b>
+information: <b>{{ district.base_information }}</b>
+force: <b>{{ district.base_force }}</b>
+{%- endif %}

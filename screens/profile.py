@@ -42,7 +42,7 @@ class ProfileScreen(BaseScreen):
 
         # --- Последние действия (по created_at, максимум 5) ---
         recent_actions = [
-            f"{a.description} ({a.status})"
+            f"({a.status})"
             for a in sorted(user.actions, key=lambda x: x.created_at, reverse=True)[:5]
         ]
 
