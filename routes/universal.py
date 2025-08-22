@@ -10,7 +10,7 @@ router = Router()
 @router.message(StateFilter("*"), F.text)
 async def any_text_with_state(message: types.Message, state: FSMContext):
     state_key = await state.get_state()  # строка "Package:state_name" или None
-    logging.info(f"Handling some state with state_key: {state_key}, in state {state.set_state()}")
+    logging.info(f"Handling some state with state_key: {state_key}, in state {state}")
     if not state_key:
         # у пользователя нет стейта — пропускаем, пусть другие хэндлеры обрабатывают
         return

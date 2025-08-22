@@ -1,0 +1,51 @@
+{# templates/ru/action_settings.j2 #}
+{% set status_emoji = {"draft":"⚪️","pending":"🟡","done":"✅","failed":"❌"} %}
+{% set status_ru = {"draft":"черновик","pending":"в ожидании","done":"выполнено","failed":"провалено"} %}
+{% set kind_emoji = {"defend":"🛡️","attack":"⚔️","scout":"🕵️","communicate":"🗞️"} %}
+{% set kind_ru = {"defend":"Оборона","attack":"Атака","scout":"Разведка","communicate":"Коммуникация"} %}
+{% set type_ru = {"individual":"индивидуальная","collective":"коллективная","support":"помощь"} %}
+{% macro res_row(icon,label_ru,value) -%}{{ icon }} {{ label_ru }}: <b>{{ value|default(0) }}</b>{%- endmacro %}
+{% macro nonzero(r) -%}{{ (r.force|default(0)) or (r.money|default(0)) or (r.influence|default(0)) or (r.information|default(0)) }}{%- endmacro %}
+{% set kind = (action.kind or '')|lower %}
+{% set show_district = kind in ['defend','attack'] %}
+{% set show_type = kind in ['defend','attack'] %}
+{% set show_resources_all = kind in ['defend','attack'] %}
+{% set resources_only_info = kind == 'communicate' %}
+{% set is_scout = kind == 'scout' %}
+
+<b>{{ kind_emoji.get(kind,"❔") }} Действие: {{ kind_ru.get(kind,action.kind) }}</b>{% if action.id %} <i>(#{{ action.id }})</i>{% endif %}
+Статус: {{ status_emoji.get(action.status|default('pending'),"🟡") }} <b>{{ status_ru.get(action.status,action.status) }}</b>
+{% if show_type %}Тип: <b>{{ type_ru.get(action.type,action.type) }}</b>{% endif %}
+{% if action.title %}<b>Название:</b> {{ action.title }}{% endif %}
+<b>Инициатор:</b> {{ action.owner.name|default("—") }}
+{% if show_district %}{% if action.district %}<b>Район:</b> {{ action.district.name }}{% else %}<b>Район:</b> <i>не выбран</i>{% endif %}{% endif %}
+{% if show_district and action.on_point is defined %}<b>На точке:</b> {{ "да" if action.on_point else "нет" }}{% endif %}
+<b>Время:</b> создано {{ action.created_human|default("—") }}, обновлено {{ action.updated_human|default("—") }}
+
+{% if action.text %}{% if is_scout %}<b>Вопрос мастерам:</b>{% elif kind=='communicate' %}<b>Текст новости:</b>{% else %}<b>Комментарий:</b>{% endif %} {{ action.text }}{% endif %}
+
+{% set r = action.resources or {} %}
+{% if is_scout %}<b>🔧 Стоимость:</b> {{ res_row("🧠","информация",r.information|default(1)) }}
+{% elif resources_only_info %}<b>🔧 Ресурсы:</b> {{ res_row("🧠","информация",r.information) }}
+{% elif show_resources_all %}{% if nonzero(r) %}<b>🔧 Ресурсы:</b>
+{{ res_row("💪","сила",r.force) }}
+{{ res_row("💰","деньги",r.money) }}
+{{ res_row("🪙","влияние",r.influence) }}
+{{ res_row("🧠","информация",r.information) }}
+{% else %}<b>🔧 Ресурсы:</b> всё по нулям{% endif %}{% endif %}
+
+{% if show_type %}
+  {% if action.support and action.support.is_support %}
+<b>🤝 Это действие-помощь</b> Базовое действие: #{{ action.support.parent_id }} — {{ action.support.parent_title|default("без названия") }}
+  {% elif action.type=="collective" %}
+<b>👥 Коллективное действие</b> Присоединившихся: <b>{{ (action.support and action.support.children_count) or 0 }}</b>
+    {# СЫРАЯ ССЫЛКА ДЛЯ ПРИСОЕДИНЕНИЯ — выводим только для коллективных pending #}
+    {% if action.status == 'pending' and action.join_link %}
+<b>Ссылка для присоединения:</b> {{ action.join_link }}
+    {% endif %}
+  {% endif %}
+{% endif %}
+
+{% if kind in ['defend','attack'] %}<i>Используйте кнопки ниже, чтобы настроить ресурсы и выбрать район.</i>
+{% elif is_scout %}<i>Подтвердите создание разведки. Отмена после создания невозможна.</i>
+{% elif kind=='communicate' %}<i>Отправьте текст новости (тратится только информация).</i>{% endif %}

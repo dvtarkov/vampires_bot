@@ -6,11 +6,18 @@ from aiogram import types
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-
+from config import load_config
 from db.session import get_session
 from db.models import User, District, ActionStatus, ActionType, Action
+from keyboards.spec import KeyboardSpec, KeyboardParams
 from .base import BaseScreen
 from keyboards.presets import district_list_kb, action_district_list_kb, action_setup_kb
+
+config = load_config()
+
+
+def make_support_link(bot_username: str, parent_id: int) -> str:
+    return f"https://t.me/{bot_username}?start=support_{parent_id}"
 
 
 class DistrictActionList(BaseScreen):
@@ -22,6 +29,9 @@ class DistrictActionList(BaseScreen):
         move: str | None = None,   # 'next' | 'prev' | None
         **kwargs
     ):
+        action = kwargs.get("action")
+        print(f"ACTION: {action}")
+
         tg_id = actor.id if actor else message.from_user.id
         logging.info("DistrictList for tg_id=%s", tg_id)
 
@@ -79,17 +89,17 @@ class DistrictActionList(BaseScreen):
         return {
             "district": district,
             "info": info,
-            "keyboard": action_district_list_kb("defend")
+            "keyboard": action_district_list_kb(action)
         }
 
 
-class DefendActionScreen(BaseScreen):
+class SettingsActionScreen(BaseScreen):
     async def _pre_render(
         self,
         message: types.Message,
         actor: types.User | None = None,
         state: FSMContext | None = None,
-        move: str | None = None,   # 'next' | 'prev' | None
+        move: str | None = None,
         **kwargs
     ):
         tg_id = actor.id if actor else message.from_user.id
@@ -101,7 +111,6 @@ class DefendActionScreen(BaseScreen):
             except Exception:
                 return "—"
 
-        # -------- 1) достаём пользователя --------
         async with get_session() as session:
             user = await User.get_by_tg_id(session, tg_id)
             if not user:
@@ -114,21 +123,27 @@ class DefendActionScreen(BaseScreen):
                     language_code=(actor or message.from_user).language_code,
                 )
 
-            # -------- 2) достаём/получаем действие --------
             action_obj: Action | None = kwargs.get("action")
             action_id: int | None = kwargs.get("action_id")
-
             if not action_obj and action_id:
-                action_obj = (await session.execute(
-                    select(Action).where(Action.id == action_id)
-                )).scalars().first()
+                action_obj = (
+                    await session.execute(
+                        select(Action)
+                        .options(
+                            selectinload(Action.support_actions),
+                            selectinload(Action.parent_action),
+                            selectinload(Action.owner),
+                            selectinload(Action.district),
+                        )
+                        .where(Action.id == action_id)
+                    )
+                ).scalars().first()
 
-            # -------- 3) формируем контекст для шаблона --------
+            # ---- собрать контекст ----
             if action_obj:
-                # district может быть None
                 district_name = action_obj.district.name if action_obj.district else None
                 owner_name = (
-                    action_obj.owner.first_name
+                    action_obj.owner.in_game_name
                     or action_obj.owner.username
                     or str(user.tg_id)
                 )
@@ -144,7 +159,7 @@ class DefendActionScreen(BaseScreen):
                     "id": action_obj.id,
                     "kind": action_obj.kind,
                     "title": action_obj.title,
-                    "status": action_obj.status.value if isinstance(action_obj.status, ActionStatus) else (action_obj.status or "pending"),
+                    "status": action_obj.status.value if isinstance(action_obj.status, ActionStatus) else (action_obj.status or "draft"),
                     "type": action_obj.type.value if isinstance(action_obj.type, ActionType) else (action_obj.type or "individual"),
                     "owner": {"name": owner_name},
                     "district": {"name": district_name} if district_name else None,
@@ -157,19 +172,21 @@ class DefendActionScreen(BaseScreen):
                         "information": action_obj.information,
                     },
                     "support": support,
+                    "ui": {  # UI-флаги для шаблона; значениями займёмся ниже
+                        "show_type_switch": True,
+                        "show_district": True,
+                        "resources_editable": True,
+                    },
                 }
             else:
-                # дефолтный «черновик» defend без района
                 action_ctx = {
                     "id": None,
                     "kind": "defend",
                     "title": kwargs.get("title"),
                     "status": ActionStatus.PENDING.value,
                     "type": ActionType.INDIVIDUAL.value,
-                    "owner": {
-                        "name": user.first_name or user.username or str(user.tg_id)
-                    },
-                    "district": None,  # не выбран
+                    "owner": {"name": user.first_name or user.username or str(user.tg_id)},
+                    "district": None,
                     "created_human": "—",
                     "updated_human": "—",
                     "resources": {
@@ -184,14 +201,62 @@ class DefendActionScreen(BaseScreen):
                         "parent_title": None,
                         "children_count": 0,
                     },
+                    "ui": {
+                        "show_type_switch": True,
+                        "show_district": True,
+                        "resources_editable": True,
+                    },
                 }
 
-        # -------- 4) вернуть контекст + клавиатуру --------
-        # Если хочешь менять состав кнопок — передай список ресурсов здесь
-        logging.info("Jinja ctx keys for %s: %s",
-                      self.__class__.__name__, action_ctx)
+            # ---- ветвление по типу действия ----
+            kind = (action_ctx["kind"] or "").lower()
+
+            # по умолчанию (defend/attack) — как было
+            resources_for_kb = ["force", "money", "influence", "information"]
+            keyboard: KeyboardSpec
+            action_ctx["join_link"] = make_support_link(config.bot_name, action_obj.id) \
+                if action_obj.type == ActionType.COLLECTIVE and action_obj.status == ActionStatus.PENDING \
+                else None
+            if kind in ("defend", "attack"):
+                action_ctx["ui"]["show_type_switch"] = True
+                action_ctx["ui"]["show_district"] = True
+                action_ctx["ui"]["resources_editable"] = True
+                is_help = action_ctx.get("type").lower() == "support"
+                keyboard = action_setup_kb(resources_for_kb, action_ctx["id"], action_ctx["status"], is_help=is_help)
+
+            elif kind == "scout":
+                # скрываем переключатель типа, район и редактирование ресурсов
+                action_ctx["ui"]["show_type_switch"] = False
+                action_ctx["ui"]["show_district"] = False
+                action_ctx["ui"]["resources_editable"] = False
+
+                # минимальная клавиатура: Done/Back
+                button_params = {"done": {"action_id": action_ctx["id"]}, "delete": {"action_id": action_ctx["id"]}}
+                opts = [["delete", "done"], ["back"]] if action_obj.status is ActionStatus.DRAFT else [["back"]]
+                keyboard = KeyboardSpec(
+                    type="inline",
+                    name="action_setup_menu",
+                    options=opts,
+                    params=KeyboardParams(max_in_row=1),
+                    button_params=button_params,
+                )
+
+            elif kind == "communicate":
+                # район не настраивается; тратится только информация
+                action_ctx["ui"]["show_type_switch"] = False      # без инд/коллектива
+                action_ctx["ui"]["show_district"] = False         # скрываем район
+                action_ctx["ui"]["resources_editable"] = True     # редактируем только information
+
+                resources_for_kb = ["information"]
+                keyboard = action_setup_kb(resources_for_kb, action_ctx["id"], action_ctx["status"], communicate=True)
+
+            else:
+                # запасной вариант — поведение как у defend
+                keyboard = action_setup_kb(resources_for_kb, action_ctx["id"], action_ctx["status"])
+
+        logging.info("Jinja ctx keys for %s: %s", self.__class__.__name__, action_ctx)
 
         return {
             "action": action_ctx,
-            "keyboard": action_setup_kb(["force", "money", "influence", "information"])
+            "keyboard": keyboard,
         }

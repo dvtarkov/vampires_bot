@@ -3,6 +3,7 @@ from aiogram.fsm.context import FSMContext
 
 from screens.actions import ActionsScreen
 from screens.district_list import DistrictList
+from screens.news_list import NewsList
 from screens.profile import ProfileScreen
 from .registry import option
 from screens.main_menu import MainMenuScreen
@@ -23,8 +24,9 @@ async def open_districts(cb: types.CallbackQuery, state: FSMContext, **_):
 
 
 @option("main_menu_news")
-async def main_menu_news(cb: types.CallbackQuery):
-    await cb.answer("Новостей пока нет 🗞️")
+async def main_menu_news(cb: types.CallbackQuery, state: FSMContext, **_):
+    await NewsList().run(message=cb.message, actor=cb.from_user, state=state)
+    await cb.answer()
 
 
 @option("main_menu_profile")

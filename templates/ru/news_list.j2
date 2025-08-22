@@ -1,0 +1,15 @@
+{# templates/ru/news_list.j2 #}
+{% set np = news_page %}
+<b>🗞️ Новости</b> — страница {{ np.page }}/{{ np.pages }} (всего: {{ np.total }})
+
+{% set items = np["items"] if "items" in np else [] %}
+{% if not items %}
+Нет новостей.
+{% else %}
+{% for n in items %}
+<b>• {{ n.title }}</b> <i>{{ n.created_human }}</i>
+{{ n.body }}
+{% if n.media_count > 0 %}Медиа: {{ n.media_count }}{% endif %}
+{% if n.action %}Связано с действием #{{ n.action.id }} ({{ n.action.kind }}) — {{ n.action.title or "без названия" }}{% endif %}
+{% endfor %}
+{% endif %}

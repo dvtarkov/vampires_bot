@@ -1,0 +1,13 @@
+{% set ctx = scout_info %}
+
+<b>{{ ctx.title }}</b>
+
+{% if ctx.error_text %}
+⚠️ <b>Ошибка:</b> {{ ctx.error_text }}
+{% endif %}
+
+{% for line in ctx.lines %}
+• {{ line }}
+{% endfor %}
+
+<i>{{ ctx.hint }}</i>

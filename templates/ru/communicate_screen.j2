@@ -1,0 +1,11 @@
+<b>{{ communicate.title }}</b>
+
+{% for line in communicate.lines %}
+• {{ line }}
+{% endfor %}
+
+{% if communicate.error_text %}
+❗ <b>Ошибка:</b> {{ communicate.error_text }}
+{% endif %}
+
+<i>{{ communicate.hint }}</i>

@@ -47,7 +47,7 @@ class ProfileScreen(BaseScreen):
         ]
 
         profile = {
-            "name": user.first_name or user.username or str(user.tg_id),
+            "name": user.in_game_name or user.username or str(user.tg_id),
             "faction": user.faction,
             "ideology_value": user.ideology,
             "ideology_label": user.ideology,

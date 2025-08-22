@@ -13,4 +13,18 @@ money: <b>{{ district.base_money }}</b>
 influence: <b>{{ district.base_influence }}</b>
 information: <b>{{ district.base_information }}</b>
 force: <b>{{ district.base_force }}</b>
+
+{% if politicians and politicians|length > 0 %}
+<b>Политики в районе:</b>
+{% for p in politicians %}
+• <b>{{ p.name }}</b> (влияние: {{ p.influence }})
+  Идеология: {{ p.ideology_bar }} ({{ p.ideology }})
+  Роль: {{ p.role_and_influence }}
+  {% if p.bonuses_penalties %}Бонусы/штрафы: {{ p.bonuses_penalties }}{% endif %}
+{% endfor %}
+{% else %}
+<i>Политиков не найдено.</i>
+
+{% endif %}
+
 {%- endif %}

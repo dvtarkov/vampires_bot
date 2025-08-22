@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Optional, Sequence, List
+from sqlalchemy import Boolean
 
 from sqlalchemy import (
     BigInteger,
@@ -13,7 +14,7 @@ from sqlalchemy import (
     update,
     delete,
     func,
-    Index, Enum, Integer, CheckConstraint, Float, UniqueConstraint,
+    Index, Enum, Integer, CheckConstraint, Float, UniqueConstraint, JSON, Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -355,11 +356,16 @@ class ActionType(PyEnum):
     SUPPORT = "support"
     COLLECTIVE = "collective"
 
+    SCOUT_DISTRICT = "scout_dist"
+    SCOUT_INFO = "scout_info"
+
 
 class ActionStatus(PyEnum):
+    DRAFT = "draft"
     PENDING = "pending"
     DONE = "done"
     FAILED = "failed"
+    DELETED = "deleted"
 
 
 class Action(Base):
@@ -370,7 +376,7 @@ class Action(Base):
     title: Mapped[Optional[str]] = mapped_column(String(255))
     status: Mapped[ActionStatus] = mapped_column(
         Enum(ActionStatus, name="action_status_enum"),
-        default=ActionStatus.PENDING,
+        default=ActionStatus.DRAFT,
         nullable=False,
     )
 
@@ -422,6 +428,8 @@ class Action(Base):
     influence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     information: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    on_point: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -429,6 +437,8 @@ class Action(Base):
         onupdate=now_utc,
         nullable=False
     )
+
+    text: Mapped[Optional[str]] = mapped_column(String(600), nullable=True)
 
     # простые CRUD
     @classmethod
@@ -487,5 +497,207 @@ class Action(Base):
     @classmethod
     async def delete(cls, session, action_id: int) -> bool:
         res = await session.execute(delete(cls).where(cls.id == action_id))
+        await session.commit()
+        return (res.rowcount or 0) > 0
+
+
+class News(Base):
+    __tablename__ = "news"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    # 1) Заголовок
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # 2) Текст новости (можно длинный)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # 3) Медиафайлы как список ссылок (может быть пустым)
+    #    Для SQLite JSON хранится как TEXT, для Postgres — как native JSONB.
+    media_urls: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+
+    # 4) Привязка к действию (опционально)
+    action_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("actions.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    action: Mapped[Optional["Action"]] = relationship(
+        "Action", lazy="selectin"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=now_utc,
+        onupdate=now_utc,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_news_action_created", "action_id", "created_at"),
+    )
+
+    # ===== CRUD / helpers =====
+    @classmethod
+    async def create(
+        cls,
+        session,
+        *,
+        title: str,
+        body: str,
+        media_urls: Optional[list[str]] = None,
+        action_id: Optional[int] = None,
+    ) -> "News":
+        obj = cls(
+            title=title,
+            body=body,
+            media_urls=media_urls or [],
+            action_id=action_id,
+        )
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+        return obj
+
+    @classmethod
+    async def get_by_id(cls, session, news_id: int) -> Optional["News"]:
+        res = await session.execute(select(cls).where(cls.id == news_id))
+        return res.scalars().first()
+
+    @classmethod
+    async def latest(
+        cls,
+        session,
+        *,
+        limit: int = 20,
+        action_id: Optional[int] = None,
+    ) -> list["News"]:
+        stmt = select(cls).order_by(cls.created_at.desc()).limit(limit)
+        if action_id is not None:
+            stmt = select(cls).where(cls.action_id == action_id).order_by(cls.created_at.desc()).limit(limit)
+        res = await session.execute(stmt)
+        return list(res.scalars().all())
+
+    @classmethod
+    async def update(
+        cls,
+        session,
+        news_id: int,
+        **values,
+    ) -> bool:
+        values["updated_at"] = now_utc()
+        res = await session.execute(
+            update(cls)
+            .where(cls.id == news_id)
+            .values(**values)
+            .execution_options(synchronize_session="fetch")
+        )
+        await session.commit()
+        return (res.rowcount or 0) > 0
+
+    @classmethod
+    async def delete(cls, session, news_id: int) -> bool:
+        res = await session.execute(delete(cls).where(cls.id == news_id))
+        await session.commit()
+        return (res.rowcount or 0) > 0
+
+
+class Politician(Base):
+    __tablename__ = "politicians"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    # Имя политика (обязательное)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+
+    # Роль и влияние (произвольный текст)
+    role_and_influence: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Район (опционально)
+    district_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("districts.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    district: Mapped[Optional["District"]] = relationship("District", lazy="selectin")
+
+    # Склонность/идеология (-5..+5)
+    ideology: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Влияние (может быть отрицательным)
+    influence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Бонусы и штрафы (опционально)
+    bonuses_penalties: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("ideology >= -5 AND ideology <= 5", name="ck_politicians_ideology_range"),
+        Index("ix_politicians_district_name", "district_id", "name"),
+    )
+
+    # ===== CRUD / helpers =====
+    @classmethod
+    async def create(
+        cls,
+        session,
+        *,
+        name: str,
+        role_and_influence: str,
+        district_id: Optional[int] = None,
+        ideology: int = 0,
+        influence: int = 0,
+        bonuses_penalties: Optional[str] = None,
+    ) -> "Politician":
+        obj = cls(
+            name=name,
+            role_and_influence=role_and_influence,
+            district_id=district_id,
+            ideology=ideology,
+            influence=influence,
+            bonuses_penalties=bonuses_penalties,
+        )
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+        return obj
+
+    @classmethod
+    async def get_by_id(cls, session, politician_id: int) -> Optional["Politician"]:
+        res = await session.execute(select(cls).where(cls.id == politician_id))
+        return res.scalars().first()
+
+    @classmethod
+    async def by_district(cls, session, district_id: int) -> list["Politician"]:
+        res = await session.execute(
+            select(cls).where(cls.district_id == district_id).order_by(cls.name)
+        )
+        return list(res.scalars().all())
+
+    @classmethod
+    async def list_all(cls, session) -> list["Politician"]:
+        res = await session.execute(select(cls).order_by(cls.name))
+        return list(res.scalars().all())
+
+    @classmethod
+    async def update(cls, session, politician_id: int, **values) -> bool:
+        values["updated_at"] = now_utc()
+        res = await session.execute(
+            update(cls)
+            .where(cls.id == politician_id)
+            .values(**values)
+            .execution_options(synchronize_session="fetch")
+        )
+        await session.commit()
+        return (res.rowcount or 0) > 0
+
+    @classmethod
+    async def delete(cls, session, politician_id: int) -> bool:
+        res = await session.execute(delete(cls).where(cls.id == politician_id))
         await session.commit()
         return (res.rowcount or 0) > 0

@@ -3,11 +3,13 @@ import logging
 from aiogram import Bot, Dispatcher
 from logging_config import setup_logging
 from config import load_config
+from middlewares.timing import TimingMW
 from routes import router as main_router
 from routes.options import router as options_router
 from options.registry import load_all_options
 from middlewares.user_registration import UserRegistrationMiddleware
 from text_handlers import load_all_text_handlers, _REGISTRY
+
 
 config = load_config()
 setup_logging(level=config.log_level)
@@ -22,7 +24,7 @@ async def main():
 
     bot = Bot(token=config.bot_token)
     dp = Dispatcher()
-
+    dp.update.middleware(TimingMW())
     dp.message.middleware(UserRegistrationMiddleware())
     dp.callback_query.middleware(UserRegistrationMiddleware())
 
