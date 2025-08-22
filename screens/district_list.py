@@ -49,7 +49,7 @@ class DistrictList(BaseScreen):
                 await session.execute(
                     select(District)
                     .options(selectinload(District.owner))
-                    .order_by(District.name.asc(), District.id.asc())
+                    .order_by(District.id)
                 )
             ).scalars().all()
 

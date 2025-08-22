@@ -47,32 +47,38 @@ def action_district_list_kb(action) -> KeyboardSpec:
     )
 
 
-def action_setup_kb(resources: List[str], action_id: int, action_status: ActionStatus,
-                    communicate=False, is_help=False) -> KeyboardSpec:
+def action_setup_kb(
+    resources: List[str],
+    action_id: int,
+    action_status: ActionStatus | str,
+    *,
+    communicate: bool = False,
+    is_help: bool = False,
+    is_list: bool = False,           # <--- НОВОЕ
+) -> KeyboardSpec:
     """
-    Строит inline-клавиатуру для настройки защиты.
-    Для каждого ресурса добавляет ряд: <res>_remove | <res> | <res>_add
-    В конце добавляется ряд с кнопкой 'back'.
+    Строит inline-клавиатуру для настройки действия.
+    В режиме is_list добавляет кнопки prev/next для листания экшенов.
     """
-    rows: List[RowOrName] = list()
+    rows: List[RowOrName] = []
+
+    # ---- основное содержимое по статусу ----
     if action_status is ActionStatus.DRAFT or action_status == "draft":
         if not communicate:
             if not is_help:
                 rows.append(["collective", "individual"])
             for res in resources:
                 res = res.strip()
-                if not res:
-                    continue
-                rows.append([f"{res}_remove", res, f"{res}_add"])
+                if res:
+                    rows.append([f"{res}_remove", res, f"{res}_add"])
             rows.append(["moving_on_point"])
             rows.append(["done"])
             rows.append(["delete", "back"])
         else:
             for res in resources:
                 res = res.strip()
-                if not res:
-                    continue
-                rows.append([f"{res}_remove", res, f"{res}_add"])
+                if res:
+                    rows.append([f"{res}_remove", res, f"{res}_add"])
             rows.append(["done"])
             rows.append(["delete", "back"])
 
@@ -84,7 +90,19 @@ def action_setup_kb(resources: List[str], action_id: int, action_status: ActionS
             rows.append(["back"])
     else:
         rows.append(["back"])
-    butns_kwargs = {row: {"action_id": action_id} for row in sum(rows, [])}
+
+    # ---- навигация списка ----
+    if is_list:
+        # вставим навигацию в начало, чтобы она была всегда под рукой
+        rows.insert(0, ["prev", "next"])
+
+    # ---- параметры кнопок ----
+    # по умолчанию всем прокидываем action_id
+    butns_kwargs: dict[str, dict] = {btn: {"action_id": action_id, "is_list": is_list} for btn in sum(rows, [])}
+    if is_list:
+        # навигации нужен только флаг is_list
+        butns_kwargs["prev"] = {"is_list": True}
+        butns_kwargs["next"] = {"is_list": True}
 
     return KeyboardSpec(
         type="inline",
@@ -93,6 +111,7 @@ def action_setup_kb(resources: List[str], action_id: int, action_status: ActionS
         params=KeyboardParams(max_in_row=3),
         button_params=butns_kwargs,
     )
+
 
 
 def scout_choice_kb() -> KeyboardSpec:

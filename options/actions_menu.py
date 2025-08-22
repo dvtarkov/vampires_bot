@@ -1,6 +1,7 @@
 from aiogram import types
 from aiogram.fsm.context import FSMContext
 
+from screens.actions_stats import ActionsStatsScreen
 from screens.communicate_screen import CommunicateScreen
 from screens.scout_action import ScoutActionScreen
 from screens.settings_action import DistrictActionList
@@ -35,4 +36,10 @@ async def actions_menu_scout(cb: types.CallbackQuery):
 @option("actions_menu_communicate")
 async def actions_menu_communicate(cb: types.CallbackQuery, state: FSMContext):
     await CommunicateScreen().run(message=cb.message, action="scout", state=state)
+    await cb.answer()
+
+
+@option("actions_menu_actions_list")
+async def actions_menu_actions_list(cb: types.CallbackQuery, state: FSMContext):
+    await ActionsStatsScreen().run(message=cb.message, actor=cb.from_user, state=state)
     await cb.answer()

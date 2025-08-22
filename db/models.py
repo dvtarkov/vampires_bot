@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Optional, Sequence, List
-from sqlalchemy import Boolean
+from sqlalchemy import Boolean, Table, Column
 
 from sqlalchemy import (
     BigInteger,
@@ -24,6 +24,18 @@ from enum import Enum as PyEnum
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# ===========================
+#   Assoc: User <-> District (scouting)
+# ===========================
+user_scouts_districts = Table(
+    "user_scouts_districts",
+    Base.metadata,
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("district_id", ForeignKey("districts.id", ondelete="CASCADE"), primary_key=True),
+    Index("ix_user_scouts_user_district", "user_id", "district_id", unique=True),
+)
 
 
 # ===========================
@@ -54,6 +66,7 @@ class User(Base):
     available_actions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # сколько слотов
     max_available_actions: Mapped[int] = mapped_column(Integer, default=5, nullable=True)  # сколько слотов
     actions_refresh_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Один-ко-многим: User -> District
     districts: Mapped[List["District"]] = relationship(
@@ -62,6 +75,12 @@ class User(Base):
         lazy="selectin",
         cascade="all, delete-orphan",
         passive_deletes=True,  # работает полноценно на Postgres (FK ON DELETE CASCADE)
+    )
+    scouts_districts: Mapped[List["District"]] = relationship(
+        "District",
+        secondary=user_scouts_districts,
+        back_populates="scouting_by",
+        lazy="selectin",
     )
 
     actions: Mapped[List["Action"]] = relationship(
@@ -202,6 +221,12 @@ class District(Base):
     # Множитель ресурсов (Resource Multiplier: 40.0% => 0.4)
     resource_multiplier: Mapped[float] = mapped_column(
         Float, default=0.40, nullable=False
+    )
+    scouting_by: Mapped[List["User"]] = relationship(
+        "User",
+        secondary=user_scouts_districts,
+        back_populates="scouts_districts",
+        lazy="selectin",
     )
 
     # Базовые ресурсы (Base Resources)
@@ -428,6 +453,7 @@ class Action(Base):
     influence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     information: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    estimated_power: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     on_point: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
@@ -541,13 +567,13 @@ class News(Base):
     # ===== CRUD / helpers =====
     @classmethod
     async def create(
-        cls,
-        session,
-        *,
-        title: str,
-        body: str,
-        media_urls: Optional[list[str]] = None,
-        action_id: Optional[int] = None,
+            cls,
+            session,
+            *,
+            title: str,
+            body: str,
+            media_urls: Optional[list[str]] = None,
+            action_id: Optional[int] = None,
     ) -> "News":
         obj = cls(
             title=title,
@@ -567,11 +593,11 @@ class News(Base):
 
     @classmethod
     async def latest(
-        cls,
-        session,
-        *,
-        limit: int = 20,
-        action_id: Optional[int] = None,
+            cls,
+            session,
+            *,
+            limit: int = 20,
+            action_id: Optional[int] = None,
     ) -> list["News"]:
         stmt = select(cls).order_by(cls.created_at.desc()).limit(limit)
         if action_id is not None:
@@ -581,10 +607,10 @@ class News(Base):
 
     @classmethod
     async def update(
-        cls,
-        session,
-        news_id: int,
-        **values,
+            cls,
+            session,
+            news_id: int,
+            **values,
     ) -> bool:
         values["updated_at"] = now_utc()
         res = await session.execute(
@@ -644,15 +670,15 @@ class Politician(Base):
     # ===== CRUD / helpers =====
     @classmethod
     async def create(
-        cls,
-        session,
-        *,
-        name: str,
-        role_and_influence: str,
-        district_id: Optional[int] = None,
-        ideology: int = 0,
-        influence: int = 0,
-        bonuses_penalties: Optional[str] = None,
+            cls,
+            session,
+            *,
+            name: str,
+            role_and_influence: str,
+            district_id: Optional[int] = None,
+            ideology: int = 0,
+            influence: int = 0,
+            bonuses_penalties: Optional[str] = None,
     ) -> "Politician":
         obj = cls(
             name=name,

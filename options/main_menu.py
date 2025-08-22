@@ -6,7 +6,7 @@ from screens.district_list import DistrictList
 from screens.news_list import NewsList
 from screens.profile import ProfileScreen
 from .registry import option
-from screens.main_menu import MainMenuScreen
+from screens.main_menu import MainMenuScreen, HelpMenuScreen
 
 
 @option("main_menu_actions")
@@ -37,5 +37,11 @@ async def main_menu_profile(cb: types.CallbackQuery):
 
 @option("main_menu_help")
 async def main_menu_help(cb: types.CallbackQuery):
+    await HelpMenuScreen().run(message=cb.message)
+    await cb.answer()
+
+
+@option("profile_menu_back")
+async def profile_menu_back(cb: types.CallbackQuery):
     await MainMenuScreen().run(message=cb.message)
     await cb.answer()

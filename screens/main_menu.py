@@ -11,3 +11,15 @@ class MainMenuScreen(BaseScreen):
         logging.info("MainMenuScreen for user_id=%s", message.from_user.id)
 
         return {"keyboard": main_menu_kb()}
+
+
+class HelpMenuScreen(BaseScreen):
+    async def _pre_render(self, message: types.Message, **kwargs):
+        logging.info("HelpMenuScreen for user_id=%s", message.from_user.id)
+
+        return {"keyboard": KeyboardSpec(
+            type="inline",
+            name="profile_menu",
+            options=["back"],
+            params=KeyboardParams(max_in_row=2),
+        )}

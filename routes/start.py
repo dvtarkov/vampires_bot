@@ -23,14 +23,14 @@ async def start_with_payload(message: types.Message, command: CommandObject, sta
 
     # Нет payload — обычный /start
     if not payload:
-        # если в профиле уже есть in_game_name — показываем успех, иначе — регистрацию
-        async with get_session() as session:
-            user = await User.get_by_tg_id(session, message.from_user.id)
-        if user and user.in_game_name:
-            await RegistrationSuccessScreen().run(message=message, actor=message.from_user, state=state)
-        else:
-            await RegistrationScreen().run(message=message, actor=message.from_user, state=state)
-        return
+        logging.info("Handling /start from user_id=%s", message.from_user.id)
+
+        # на всякий очищаем предыдущие состояния
+        try:
+            await state.clear()
+        except Exception:
+            pass
+        await MainMenuScreen().run(message=message, actor=message.from_user, state=state, force_new=True)
 
     # Поддержка формата support_<ID>
     if not payload.startswith("support_"):
@@ -71,6 +71,14 @@ async def start_with_payload(message: types.Message, command: CommandObject, sta
 
         if not parent:
             await message.answer("Исходная заявка не найдена.")
+            return
+
+        # 🚫 запрет присоединения к своей заявке
+        if parent.owner_id == user.id:
+            await message.answer(
+                "Нельзя присоединиться к своей же заявке (атака/оборона). "
+                "Поддержка доступна только для действий других игроков."
+            )
             return
 
         # 3) валидации: только defend/attack и только PENDING
@@ -116,16 +124,4 @@ async def start_handler(message: types.Message, state):
         await state.clear()
     except Exception:
         pass
-    await MainMenuScreen().run(message=message, actor=message.from_user, state=state)
-
-    # tg_id = message.from_user.id
-    #
-    # # достаём пользователя
-    # async with get_session() as session:
-    #     user = await User.get_by_tg_id(session, tg_id)
-    #
-    # # если есть и имя уже задано — успех-экран; иначе — экран ввода имени
-    # if user and user.in_game_name:
-    #     await RegistrationSuccessScreen().run(message=message, actor=message.from_user)
-    # else:
-    #     await RegistrationScreen().run(message=message, actor=message.from_user, state=state)
+    await MainMenuScreen().run(message=message, actor=message.from_user, state=state, force_new=True)

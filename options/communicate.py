@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from options.registry import option
 from screens.actions import ActionsScreen  # или ваш главный экран
 
+
 @option("communicate_prompt_back")
 async def communicate_prompt_back(cb: types.CallbackQuery, state: FSMContext):
     # Сбросим состояние ожидания текста и вернёмся на главный экран

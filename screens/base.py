@@ -56,7 +56,6 @@ class BaseScreen:
                 f"Template not found for {self.__class__.__name__} "
                 f"in {self.template_root}/{localization}/ among {candidates}"
             )
-
         rendered = template.render(**kwargs)
 
         # Клавиатура (если задали спецификацию)
@@ -66,8 +65,6 @@ class BaseScreen:
             reply_markup = _keyboard_renderer.build(keyboard_spec, kwargs)
 
         message: types.Message | None = kwargs.get("message")
-        if message is None or not hasattr(message, "answer"):
-            return {"rendered_text": rendered, "reply_markup": reply_markup}
 
         # -------- РЕЖИМЫ ОТПРАВКИ / РЕДАКТИРОВАНИЯ ----------
         render_kind: str = kwargs.get("render_kind", "main")  # "main" | "notice"
@@ -76,7 +73,12 @@ class BaseScreen:
         persist_key: str = kwargs.get("persist_key", "main")
         max_age: int = int(kwargs.get("allow_edit_age_sec", 172800))  # 48h
 
-        chat_id = message.chat.id
+        chat_id = kwargs.get("chat_id")
+        if chat_id is None:
+            if message is None:
+                raise ValueError("chat_id или message обязательно")
+            chat_id = message.chat.id
+
         send_kwargs = {
             "parse_mode": kwargs.get("parse_mode", "HTML"),
             "disable_web_page_preview": kwargs.get("disable_web_page_preview", True),
@@ -92,7 +94,17 @@ class BaseScreen:
 
         # Нотификация — всегда новое сообщение, не трогаем main
         if render_kind == "notice" or force_new:
-            sent = await message.answer(rendered, **send_kwargs)
+            if message:
+                sent = await message.answer(rendered, **send_kwargs)
+            else:
+                bot = message.bot if message else kwargs.get("bot")
+                if bot is None:
+                    raise ValueError("Нужен bot или message")
+                sent = await bot.send_message(
+                                chat_id=chat_id,
+                                text=rendered,
+                                **send_kwargs,
+                            )
             if not no_store:
                 set_message(chat_id, persist_key, render_kind, sent.message_id, c_hash)
             return {"rendered_text": rendered, "_result": sent, "reply_markup": reply_markup}

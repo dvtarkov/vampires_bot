@@ -3,6 +3,7 @@ from aiogram import types
 from sqlalchemy import select, func
 from db.session import get_session
 from db.models import User, District
+from keyboards.spec import KeyboardParams, KeyboardSpec
 from .base import BaseScreen
 from keyboards.presets import main_menu_kb
 
@@ -78,5 +79,10 @@ class ProfileScreen(BaseScreen):
 
         return {
             "profile": profile,
-            "keyboard": main_menu_kb(),
+            "keyboard": KeyboardSpec(
+                            type="inline",
+                            name="profile_menu",
+                            options=["back"],
+                            params=KeyboardParams(max_in_row=2),
+                        ),
         }

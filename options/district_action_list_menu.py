@@ -34,11 +34,10 @@ async def action_district_menu_prev(cb: types.CallbackQuery, state: FSMContext, 
 
 @option("action_district_menu_pick")
 async def action_district_menu_pick(cb: types.CallbackQuery, state: FSMContext, **kwargs):
-    print(f"KWARGS: {kwargs}")
     action_kind = kwargs.get("action")
     data = await state.get_data()
     idx = int(data.get("district_list_index", 0))
-
+    print("INDEX", idx)
     async with get_session() as session:
         user = await User.get_by_tg_id(session, cb.from_user.id)
 
@@ -46,7 +45,7 @@ async def action_district_menu_pick(cb: types.CallbackQuery, state: FSMContext, 
             await session.execute(
                 select(District)
                 .options(selectinload(District.owner))
-                .order_by(District.name, District.id)
+                .order_by(District.id)
             )
         ).scalars().all()
 
@@ -70,7 +69,7 @@ async def action_district_menu_pick(cb: types.CallbackQuery, state: FSMContext, 
             owner_id=user.id,
             status=ActionStatus.DRAFT,
             kind=action_kind,
-            title=f"{str(action_type.name).title()} {picked.name}" if district_id else f"{str(action_type.name).title()} (no district)",
+            title=f"{str(action_kind)} {picked.name}" if district_id else f"{str(action_type.name).title()} (no district)",
             district_id=district_id,
             type=action_type,
             force=0,
@@ -79,7 +78,6 @@ async def action_district_menu_pick(cb: types.CallbackQuery, state: FSMContext, 
             information=information
         )
 
-    print(f"[DEBUG] Created action {action.id} for district {district_id}")
     await SettingsActionScreen().run(message=cb.message, actor=cb.from_user, state=state, move="prev",
                                      action_id=action.id, action=action)
     await cb.answer()
