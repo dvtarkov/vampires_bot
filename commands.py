@@ -710,6 +710,94 @@ async def recalc_resource_multipliers(session: AsyncSession):
 
 
 # ===========================
+#  GRANT USERS' BASE RESOURCES
+# ===========================
+async def grant_users_base_resources(session: AsyncSession):
+    """
+    Начисляет каждому пользователю его базовые ресурсы (user.base_*).
+    Базовые ресурсы НЕ умножаются и просто добавляются к накопленным.
+    Для каждого с ненулевыми базовыми — отправляется нотификация (если доступен bot).
+    """
+    with StepTimer("Начисление базовых ресурсов игрокам"):
+        # Бот для уведомлений (если есть)
+        try:
+            from app import bot  # type: ignore
+        except Exception:
+            bot = None
+            log.warning("Бот недоступен: уведомления о базовых ресурсах отправляться не будут.")
+
+        res = await session.execute(select(User))
+        users: List[User] = list(res.scalars().all())
+        if not users:
+            log.info("Пользователей нет — базовые ресурсы начислять некому.")
+            return
+
+        total_money = total_infl = total_info = total_force = 0
+        # Запомним, кому и что начислили — нотифицируем после commit
+        to_notify: List[tuple[int, int, dict]] = []  # (user_id, user_tg_id, delta_dict)
+
+        for u in users:
+            bm  = max(0, int(u.base_money or 0))
+            bi  = max(0, int(u.base_influence or 0))
+            binf = max(0, int(u.base_information or 0))
+            bf  = max(0, int(u.base_force or 0))
+
+            if bm == 0 and bi == 0 and binf == 0 and bf == 0:
+                continue
+
+            u.money       += bm
+            u.influence   += bi
+            u.information += binf
+            u.force       += bf
+
+            total_money += bm
+            total_infl  += bi
+            total_info  += binf
+            total_force += bf
+
+            to_notify.append((u.id, u.tg_id, {
+                "money": bm, "influence": bi, "information": binf, "force": bf
+            }))
+
+        await session.commit()
+        log.info(
+            "Базовые ресурсы начислены суммарно: 💰%s 🪙%s 🧠%s 💪%s (получателей: %d)",
+            total_money, total_infl, total_info, total_force, len(to_notify)
+        )
+
+        # Нотификации
+        if bot and to_notify:
+            # подгрузим имена только для тех, кому начисляли (опционально)
+            user_ids = [uid for uid, _, _ in to_notify]
+            q = await session.execute(select(User).where(User.id.in_(user_ids)))
+            users_map = {u.id: u for u in q.scalars().all()}
+
+            for uid, tg_id, delta in to_notify:
+                # если вдруг пользователя уже нет — пропускаем
+                user = users_map.get(uid)
+                if not user:
+                    continue
+
+                body = (
+                    "Вам начислены базовые ресурсы:\n"
+                    f"• 💰 {delta['money']}\n"
+                    f"• 🪙 {delta['influence']}\n"
+                    f"• 🧠 {delta['information']}\n"
+                    f"• 💪 {delta['force']}\n"
+                )
+                try:
+                    await notify_user(
+                        bot,
+                        tg_id,
+                        title="📦 Базовые ресурсы начислены",
+                        body=body,
+                    )
+                except Exception:
+                    # не валим цикл из-за одного неотправленного сообщения
+                    log.exception("Не удалось отправить нотификацию о базовых ресурсах пользователю #%s", uid)
+
+
+# ===========================
 #    GRANT RESOURCES
 # ===========================
 async def grant_district_resources(session: AsyncSession, contested: List[int]):
@@ -864,6 +952,9 @@ async def run_game_cycle():
 
             with StepTimer("Шаг 4: Пересчёт ресурсных множителей"):
                 await recalc_resource_multipliers(session)
+
+            with StepTimer("Шаг 4.5: Базовые ресурсы игрокам"):
+                await grant_users_base_resources(session)
 
             with StepTimer("Шаг 5: Выдача ресурсов"):
                 await grant_district_resources(session, contested)

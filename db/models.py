@@ -61,6 +61,11 @@ class User(Base):
     information: Mapped[int] = mapped_column(default=0, nullable=False)
     force: Mapped[int] = mapped_column(default=0, nullable=False)
 
+    base_money: Mapped[int] = mapped_column(default=0, nullable=False)
+    base_influence: Mapped[int] = mapped_column(default=0, nullable=False)
+    base_information: Mapped[int] = mapped_column(default=0, nullable=False)
+    base_force: Mapped[int] = mapped_column(default=0, nullable=False)
+
     # НОВОЕ
     ideology: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # -5..+5
     faction: Mapped[Optional[str]] = mapped_column(String(64))  # простой текст
