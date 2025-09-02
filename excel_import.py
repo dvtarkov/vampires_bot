@@ -191,6 +191,7 @@ async def _import_districts(ws) -> int:
             "id","name","owner_tg_id","control_points","control_level",
             "resource_multiplier","base_money","base_influence","base_information","base_force",
         )):
+            print(row)
             name = _to_str_or_none(row.get("name"))
             if not name:
                 continue
@@ -392,3 +393,5 @@ async def _aiter(it):
 if __name__ == "__main__":
     import asyncio, os
     p = os.path.abspath("game_models_template.xlsx")
+    print("Importing:", p)
+    print(asyncio.run(import_excel(p)))
