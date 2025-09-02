@@ -71,7 +71,7 @@ def _ensure_cycle_workbook() -> Path:
     global CYCLE_XLSX_PATH
     if not CYCLE_TS:
         raise RuntimeError("CYCLE_TS не задан. Устанавливается в начале run_game_cycle().")
-    path = Path(f"./{CYCLE_TS}.xlsx")
+    path = Path(f"./exports/{CYCLE_TS}.xlsx")
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         wb = Workbook()
