@@ -498,6 +498,7 @@ async def _rerender_list_nav(cb: types.CallbackQuery, state: FSMContext, move: s
         statuses=statuses,
     )
 
+
 @option("action_setup_menu_prev")
 async def action_setup_menu_prev(cb: types.CallbackQuery, state: FSMContext, **_):
     try:
@@ -507,6 +508,7 @@ async def action_setup_menu_prev(cb: types.CallbackQuery, state: FSMContext, **_
         logging.exception("action_setup_menu_prev failed")
         await cb.answer(f"Ошибка: {e}", show_alert=True)
 
+
 @option("action_setup_menu_next")
 async def action_setup_menu_next(cb: types.CallbackQuery, state: FSMContext, **_):
     try:
@@ -515,3 +517,39 @@ async def action_setup_menu_next(cb: types.CallbackQuery, state: FSMContext, **_
     except Exception as e:
         logging.exception("action_setup_menu_next failed")
         await cb.answer(f"Ошибка: {e}", show_alert=True)
+
+
+@option("action_setup_menu_moving_on_point")
+async def action_setup_menu_moving_on_point(cb: types.CallbackQuery, state: FSMContext, action_id: int, **_):
+    """
+    Инвертирует флаг on_point у Action(id=action_id).
+    Ничего не перерисовывает и не меняет в UI.
+    """
+    try:
+        async with get_session() as session:
+            user = (await session.execute(
+                select(User).where(User.tg_id == cb.from_user.id)
+            )).scalars().first()
+            action = (await session.execute(
+                select(Action).where(Action.id == action_id)
+            )).scalars().first()
+
+            if not user or not action:
+                await cb.answer("Не найдена заявка/пользователь.", show_alert=True)
+                return
+            if action.owner_id != user.id:
+                await cb.answer("Эта заявка принадлежит другому игроку.", show_alert=True)
+                return
+            if action.status in (ActionStatus.DONE, ActionStatus.FAILED, ActionStatus.DELETED):
+                await cb.answer("Действие уже зафиксировано и не может быть изменено.", show_alert=True)
+                return
+
+            new_value = not bool(action.on_point)
+            action.on_point = new_value
+            await session.commit()
+
+        await cb.answer("Маркер «on point» включён ✅" if new_value else "Маркер «on point» выключен ⛔")
+
+    except Exception:
+        logging.exception("action_setup_menu_moving_on_point failed")
+        await cb.answer("Ошибка при изменении флага.", show_alert=True)
