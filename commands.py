@@ -25,9 +25,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from decimal import Decimal, ROUND_HALF_UP
 
 from db.models import (
     Base,
@@ -37,13 +38,15 @@ from db.models import (
     News,
     Politician,
     ActionStatus,
-    ActionType,
+    ActionType, user_scouts_districts,
 )
 
-from openpyxl import Workbook, load_workbook   # NEW
+from openpyxl import Workbook, load_workbook  # NEW
 
-CYCLE_TS: Optional[str] = None                  # NEW
-CYCLE_XLSX_PATH: Optional[Path] = None          # NEW
+from services.notify import notify_user
+
+CYCLE_TS: Optional[str] = None  # NEW
+CYCLE_XLSX_PATH: Optional[Path] = None  # NEW
 NEWS_HEADERS = ["created_at_utc", "tag", "title", "body", "action_id", "district_id"]  # NEW
 
 # -------- Настройки --------
@@ -56,15 +59,20 @@ SCOUT_KINDS = {"scout_dist", "scout_info"}
 
 ORDER_ATTACKS_ASC = True  # порядок атак по created_at
 
-
 # -------- Логгер --------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("game_cycle")
+
+
+def _quantize_tenth(x: float, lo: float = 0.40, hi: float = 1.20) -> float:
+    x = max(lo, min(hi, x))
+    return float(Decimal(str(x)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
 
 def _ensure_sheet(wb: Workbook, name: str, headers: List[str]) -> None:
     if name not in wb.sheetnames:
         ws = wb.create_sheet(title=name)
         ws.append(headers)
+
 
 def _ensure_cycle_workbook() -> Path:
     """Создаёт (при необходимости) XLSX для текущего цикла и возвращает путь к нему."""
@@ -81,6 +89,7 @@ def _ensure_cycle_workbook() -> Path:
         wb.save(path)
     CYCLE_XLSX_PATH = path
     return path
+
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -107,13 +116,13 @@ class CombatRates:
 
 # ====== NEWS HELPERS ======
 async def add_news(
-    session: AsyncSession,
-    title: str,
-    body: str,
-    action_id: Optional[int] = None,
-    *,
-    district_id: Optional[int] = None,
-    tag: str = "auto generated",
+        session: AsyncSession,
+        title: str,
+        body: str,
+        action_id: Optional[int] = None,
+        *,
+        district_id: Optional[int] = None,
+        tag: str = "auto generated",
 ):
     """Пишет строку новости в общий лист 'news' и (если district_id задан) в лист района."""
     path = _ensure_cycle_workbook()
@@ -130,6 +139,7 @@ async def add_news(
         wb[sheet_name].append([now_utc().isoformat(), tag, title, body, action_id, district_id])
 
     wb.save(path)
+
 
 # ====== SUPPORT AGGREGATION ======
 async def aggregate_supports(session: AsyncSession) -> Tuple[List[int], List[int]]:
@@ -173,12 +183,12 @@ async def aggregate_supports(session: AsyncSession) -> Tuple[List[int], List[int
 
         total_force = sum(max(0, int(s.force)) for s in group)
         total_money = sum(max(0, int(s.money)) for s in group)
-        total_infl  = sum(max(0, int(s.influence)) for s in group)
-        total_info  = sum(max(0, int(s.information)) for s in group)
+        total_infl = sum(max(0, int(s.influence)) for s in group)
+        total_info = sum(max(0, int(s.information)) for s in group)
 
-        parent.force       += total_force
-        parent.money       += total_money
-        parent.influence   += total_infl
+        parent.force += total_force
+        parent.money += total_money
+        parent.influence += total_infl
         parent.information += total_info
 
         touched_parents.append(parent.id)
@@ -194,7 +204,6 @@ async def aggregate_supports(session: AsyncSession) -> Tuple[List[int], List[int
         )
         await session.commit()
 
-
     return processed_support_ids, touched_parents
 
 
@@ -209,14 +218,14 @@ def resources_to_points(kind: str, action: Action, rates: CombatRates) -> int:
     # несуществующие ключи считаем с весом 0
     force_w = float(table.get("force", 0))
     money_w = float(table.get("money", 0))
-    infl_w  = float(table.get("influence", 0))
-    info_w  = float(table.get("information", 0))
+    infl_w = float(table.get("influence", 0))
+    info_w = float(table.get("information", 0))
 
     pts = (
-        max(0, int(action.force))       * force_w +
-        max(0, int(action.money))       * money_w +
-        max(0, int(action.influence))   * infl_w +
-        max(0, int(action.information)) * info_w
+            max(0, int(action.force)) * force_w +
+            max(0, int(action.money)) * money_w +
+            max(0, int(action.influence)) * infl_w +
+            max(0, int(action.information)) * info_w
     )
     pts = int(round(pts))
     if action.on_point:
@@ -323,13 +332,14 @@ async def resolve_defense_pools(session: AsyncSession, rates: CombatRates, conte
     return dict(defense_pool)
 
 
-
 # ====== ATTACK RESOLUTION ======
-async def resolve_attacks(session: AsyncSession, rates: CombatRates, defense_pool: Dict[int, int], contested: List[int]):
+async def resolve_attacks(session: AsyncSession, rates: CombatRates, defense_pool: Dict[int, int],
+                          contested: List[int]):
     """
     Пошагово резолвит атаки (kind='attack', status=PENDING) с учётом defense_pool.
     Пропускает «спорные» районы.
     """
+    from app import bot
     base_stmt = (
         select(Action)
         .where(Action.status == ActionStatus.PENDING, Action.kind == ATTACK_KIND, Action.district_id.is_not(None))
@@ -392,8 +402,15 @@ async def resolve_attacks(session: AsyncSession, rates: CombatRates, defense_poo
                         attacker.in_game_name or attacker.username or f"User#{attacker.id}") if attacker else "Неизвестный"
             attacker_faction = (attacker.faction or "без фракции") if attacker else "неизвестно"
 
+            # защитник до возможной смены владельца
+            defender_user_before = await get_user(d.owner_id) if d.owner_id else None
+            defender_name = (
+                        defender_user_before.in_game_name or defender_user_before.username or f"User#{defender_user_before.id}") if defender_user_before else "Неизвестный"
+
             if power_pts <= current_def:
                 current_def -= power_pts
+
+                # NEWS
                 await add_news(
                     session,
                     title=f"Отражена атака на район '{d.name}'",
@@ -405,13 +422,43 @@ async def resolve_attacks(session: AsyncSession, rates: CombatRates, defense_poo
                     action_id=a.id,
                     district_id=d.id,
                 )
+
+                # NOTIFY (если есть bot)
+                if bot and attacker and defender_user_before:
+                    # атакующему
+                    await notify_user(
+                        bot,
+                        attacker.tg_id,
+                        title="❌ Атака отражена",
+                        body=(
+                            f"Район <b>{d.name}</b> не взят. "
+                            f"Ваши очки: <b>{power_pts}</b>. "
+                            f"Оставшаяся оборона района: <b>{current_def}</b>."
+                        ),
+                    )
+                    # защитнику
+                    await notify_user(
+                        bot,
+                        defender_user_before.tg_id,
+                        title="🛡️ Атака отражена",
+                        body=(
+                            f"Ваш район <b>{d.name}</b> отбил атаку."
+                            f"({power_pts} очков). Текущая оборона: <b>{current_def}</b>."
+                        )
+                    )
+
             else:
                 overflow = power_pts - current_def
+                old_owner_id = d.owner_id
+                defender_user = defender_user_before
+
+                # смена владельца
                 d = await District.reassign_owner(session, district_id=district_id, new_owner_id=a.owner_id)
                 district_cache[district_id] = d
                 current_def = overflow  # остаток становится новой «обороной»
                 ownership_changes += 1
 
+                # NEWS
                 await add_news(
                     session,
                     title=f"Район '{d.name}' захвачен!",
@@ -423,6 +470,30 @@ async def resolve_attacks(session: AsyncSession, rates: CombatRates, defense_poo
                     action_id=a.id,
                     district_id=d.id,
                 )
+
+                # NOTIFY (если есть bot)
+                if bot and attacker and defender_user:
+                    # атакующему
+                    await notify_user(
+                        bot,
+                        attacker.tg_id,
+                        title="✅ Район захвачен",
+                        body=(
+                            f"Вы захватили район <b>{d.name}</b>! "
+                            f"Прорыв силой <b>{power_pts}</b>. "
+                            f"Остаток <b>{overflow}</b> стал обороной района."
+                        ),
+                    )
+                    # защитнику (бывшему владельцу)
+                    await notify_user(
+                        bot,
+                        defender_user.tg_id,
+                        title="⚠️ Потеря района",
+                        body=(
+                            f"Ваш район <b>{d.name}</b> был утерян."
+                        ),
+                    )
+
             processed_ids.append(a.id)
 
         defense_pool[district_id] = current_def
@@ -436,9 +507,9 @@ async def resolve_attacks(session: AsyncSession, rates: CombatRates, defense_poo
 
 # ====== LEFTOVER DEFENSE -> CONTROL POINTS ======
 async def convert_leftover_defense_to_control_points(
-    session: AsyncSession,
-    defense_pool: Dict[int, int],
-    contested: List[int],
+        session: AsyncSession,
+        defense_pool: Dict[int, int],
+        contested: List[int],
 ) -> None:
     """
     Вся оставшаяся после расчёта атак оборона района добавляется к District.control_points.
@@ -462,17 +533,79 @@ async def convert_leftover_defense_to_control_points(
     if updated:
         await session.commit()
 
+
 # ====== SCOUT CLOSE ======
-async def close_all_scouting(session: AsyncSession):
-    stmt = select(Action.id).where(Action.status == ActionStatus.PENDING, Action.kind.in_(SCOUT_KINDS))
+async def close_all_scouting(session: AsyncSession, bot: Bot | None = None):
+    """
+    Закрывает все pending-разведки, сбрасывает связи scout (User <-> District)
+    и уведомляет пользователей, наблюдавших за районами.
+    """
+    # --- 0) снимем список текущих наблюдений (до очистки), чтобы понимать кому слать нотификации
+    rows = await session.execute(
+        select(
+            user_scouts_districts.c.user_id,
+            user_scouts_districts.c.district_id,
+            District.name,
+        ).join(District, District.id == user_scouts_districts.c.district_id)
+    )
+    # user_id -> [(district_id, district_name), ...]
+    watched: Dict[int, List[tuple[int, str]]] = defaultdict(list)
+    for uid, did, dname in rows.all():
+        watched[int(uid)].append((int(did), dname))
+
+    # --- 1) Закрываем все PENDING scout-экшены
+    stmt = select(Action.id).where(
+        Action.status == ActionStatus.PENDING,
+        Action.kind.in_(SCOUT_KINDS),
+    )
     res = await session.execute(stmt)
     ids = [row for row in res.scalars().all()]
-    if not ids:
-        return
-    await session.execute(
-        update(Action).where(Action.id.in_(ids)).values(status=ActionStatus.DONE, updated_at=now_utc())
-    )
+    if ids:
+        await session.execute(
+            update(Action)
+            .where(Action.id.in_(ids))
+            .values(status=ActionStatus.DONE, updated_at=now_utc())
+        )
+
+    # --- 2) Сбрасываем все связи наблюдения между пользователями и районами
+    await session.execute(delete(user_scouts_districts))
+
     await session.commit()
+
+    # --- 3) Уведомления пользователям (опционально)
+    if bot and watched:
+        # подгрузим пользователей разом
+        user_ids = list(watched.keys())
+        q = await session.execute(select(User).where(User.id.in_(user_ids)))
+        users_map = {u.id: u for u in q.scalars().all()}
+
+        try:
+            key_suffix = CYCLE_TS if "CYCLE_TS" in globals() and CYCLE_TS else now_utc().strftime("%Y%m%dT%H%M%SZ")
+        except NameError:
+            key_suffix = now_utc().strftime("%Y%m%dT%H%M%SZ")
+
+        for uid, items in watched.items():
+            user = users_map.get(uid)
+            if not user or not items:
+                continue
+
+            # соберём аккуратный список районов
+            lines = [f"• {name} (#{did})" for did, name in items]
+            body = (
+                "Разведка районов завершена, наблюдение сброшено.\n\n"
+                "Список районов, за которыми вы наблюдали:\n" + "\n".join(lines) +
+                "\n\nЧтобы продолжить наблюдение, запустите новую разведку."
+            )
+
+            await notify_user(
+                bot,
+                user.tg_id,
+                title="🔍 Разведка завершена",
+                body=body,
+                parse_mode="HTML",
+                persist_key=f"scout:end:{key_suffix}:user:{uid}",
+            )
+
 
 # ====== RESOURCE MULTIPLIER BY IDEOLOGY ======
 def ideology_multiplier(owner_ideol: int, pol_ideol: Optional[int]) -> float:
@@ -518,7 +651,7 @@ async def recalc_resource_multipliers(session: AsyncSession):
         pol = pol_by_district.get(d.id)
         if owner and pol:
             mul = ideology_multiplier(owner.ideology, pol.ideology)
-            mul = max(0.40, min(1.20, mul))
+            mul = _quantize_tenth(mul, 0.40, 1.20)
             if abs(d.resource_multiplier - mul) > 1e-6:
                 d.resource_multiplier = mul
                 updated += 1
@@ -533,13 +666,19 @@ async def grant_district_resources(session: AsyncSession, contested: List[int]):
     Начисляет владельцам ресурсы с районов, исключая «спорные» районы.
     Предварительно должен быть вызван recalc_resource_multipliers().
     """
+    from app import bot
     res = await session.execute(select(District))
     districts: List[District] = list(res.scalars().all())
     if not districts:
         return
 
     contested_set = set(contested)
+
+    # агрегаты по пользователю
     changes: Dict[int, dict] = defaultdict(lambda: {"money": 0, "influence": 0, "information": 0, "force": 0})
+    # разбор по районам для нотификаций
+    per_owner_breakdown: Dict[int, List[tuple[str, dict]]] = defaultdict(list)
+
     for d in districts:
         if d.id in contested_set:
             continue
@@ -549,23 +688,69 @@ async def grant_district_resources(session: AsyncSession, contested: List[int]):
         changes[d.owner_id]["information"] += eff["information"]
         changes[d.owner_id]["force"] += eff["force"]
 
+        per_owner_breakdown[d.owner_id].append(
+            (d.name, {"money": eff["money"], "influence": eff["influence"], "information": eff["information"],
+                      "force": eff["force"]})
+        )
+
     total_money = total_infl = total_info = total_force = 0
+
+    # применяем начисления и готовим уведомления
     for uid, delta in changes.items():
         uq = await session.execute(select(User).where(User.id == uid))
         user = uq.scalars().first()
         if not user:
             continue
-        user.money       += delta["money"]
-        user.influence   += delta["influence"]
+
+        user.money += delta["money"]
+        user.influence += delta["influence"]
         user.information += delta["information"]
-        user.force       += delta["force"]
+        user.force += delta["force"]
 
         total_money += delta["money"]
-        total_infl  += delta["influence"]
-        total_info  += delta["information"]
+        total_infl += delta["influence"]
+        total_info += delta["information"]
         total_force += delta["force"]
 
     await session.commit()
+
+    # нотификации (после фикса в БД)
+    if bot:
+        for uid, items in per_owner_breakdown.items():
+            # пропускаем, если реально ноль
+            sums = changes.get(uid, {})
+            if not sums or (sums["money"] + sums["influence"] + sums["information"] + sums["force"]) <= 0:
+                continue
+
+            uq = await session.execute(select(User).where(User.id == uid))
+            user = uq.scalars().first()
+            if not user:
+                continue
+
+            # формируем компактное тело
+            lines = []
+            for name, r in items:
+                lines.append(
+                    f"• <b>{name}</b>: 💰 {r['money']}, 🪙 {r['influence']}, 🧠 {r['information']}, 💪 {r['force']}"
+                )
+            total_line = (
+                f"Итого: 💰 <b>{sums['money']}</b>, 🪙 <b>{sums['influence']}</b>, "
+                f"🧠 <b>{sums['information']}</b>, 💪 <b>{sums['force']}</b>"
+            )
+            body = "Вы получили ресурсы с контролируемых районов:\n" + "\n".join(lines) + "\n\n" + total_line
+
+            # persist_key — на цикл. Если используешь глобальный CYCLE_TS — он уже есть.
+            try:
+                key_suffix = CYCLE_TS if 'CYCLE_TS' in globals() and CYCLE_TS else now_utc().strftime("%Y%m%dT%H%M%SZ")
+            except NameError:
+                key_suffix = now_utc().strftime("%Y%m%dT%H%M%SZ")
+
+            await notify_user(
+                bot,
+                user.tg_id,
+                title="💼 Ресурсы начислены",
+                body=body
+            )
 
 
 # ====== REFRESH PLAYER ACTION SLOTS ======

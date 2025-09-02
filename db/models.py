@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from math import ceil
 from typing import Optional, Sequence, List
 from sqlalchemy import Boolean, Table, Column
 
@@ -365,10 +366,10 @@ class District(Base):
         """Рассчитать ресурсы с учётом мультипликатора."""
         mul = float(self.resource_multiplier)
         return {
-            "money": int(round(self.base_money * mul)),
-            "influence": int(round(self.base_influence * mul)),
-            "information": int(round(self.base_information * mul)),
-            "force": int(round(self.base_force * mul)),
+            "money": ceil(self.base_money * mul),
+            "influence": ceil(self.base_influence * mul),
+            "information": ceil(self.base_information * mul),
+            "force": ceil(self.base_force * mul),
         }
 
 

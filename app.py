@@ -13,6 +13,7 @@ from text_handlers import load_all_text_handlers, _REGISTRY
 
 config = load_config()
 setup_logging(level=config.log_level)
+bot = Bot(token=config.bot_token)
 
 
 async def main():
@@ -22,7 +23,6 @@ async def main():
     load_all_text_handlers("text_handlers")  # <-- ВАЖНО: до start_polling
     logging.info("Text handlers at start: %s", list(_REGISTRY.keys()))
 
-    bot = Bot(token=config.bot_token)
     dp = Dispatcher()
     dp.update.middleware(TimingMW())
     dp.message.middleware(UserRegistrationMiddleware())
