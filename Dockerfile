@@ -19,6 +19,8 @@ RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 # Только манифесты — чтобы кэш устанавливаемых пакетов не сбивался
 COPY pyproject.toml poetry.lock* ./
 
+RUN poetry lock --no-update
+
 RUN poetry install --no-root --no-interaction --no-ansi
 
 # ====== RUNTIME STAGE ======
