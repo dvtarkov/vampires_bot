@@ -535,11 +535,12 @@ async def convert_leftover_defense_to_control_points(
 
 
 # ====== SCOUT CLOSE ======
-async def close_all_scouting(session: AsyncSession, bot: Bot | None = None):
+async def close_all_scouting(session: AsyncSession):
     """
     Закрывает все pending-разведки, сбрасывает связи scout (User <-> District)
     и уведомляет пользователей, наблюдавших за районами.
     """
+    from app import bot
     # --- 0) снимем список текущих наблюдений (до очистки), чтобы понимать кому слать нотификации
     rows = await session.execute(
         select(
@@ -601,9 +602,7 @@ async def close_all_scouting(session: AsyncSession, bot: Bot | None = None):
                 bot,
                 user.tg_id,
                 title="🔍 Разведка завершена",
-                body=body,
-                parse_mode="HTML",
-                persist_key=f"scout:end:{key_suffix}:user:{uid}",
+                body=body
             )
 
 
