@@ -12,6 +12,7 @@
 {% set show_resources_all = kind in ['defend','attack'] %}
 {% set resources_only_info = kind == 'communicate' %}
 {% set is_scout = kind == 'scout' %}
+{% set is_ritual = kind == 'ritual' %}
 
 <b>{{ kind_emoji.get(kind,"❔") }} Действие: {{ kind_ru.get(kind,action.kind) }}</b>{% if action.id %} <i>(#{{ action.id }})</i>{% endif %}
 Статус: {{ status_emoji.get(action.status|default('pending'),"🟡") }} <b>{{ status_ru.get(action.status,action.status) }}</b>
@@ -25,14 +26,23 @@
 {% if action.text %}{% if is_scout %}<b>Вопрос мастерам:</b>{% elif kind=='communicate' %}<b>Текст новости:</b>{% else %}<b>Комментарий:</b>{% endif %} {{ action.text }}{% endif %}
 
 {% set r = action.resources or {} %}
-{% if is_scout %}<b>🔧 Стоимость:</b> {{ res_row("🧠","информация",r.information|default(1)) }}
-{% elif resources_only_info %}<b>🔧 Ресурсы:</b> {{ res_row("🧠","информация",r.information) }}
-{% elif show_resources_all %}{% if nonzero(r) %}<b>🔧 Ресурсы:</b>
-{{ res_row("💪","сила",r.force) }}
-{{ res_row("💰","деньги",r.money) }}
-{{ res_row("🪙","влияние",r.influence) }}
-{{ res_row("🧠","информация",r.information) }}
-{% else %}<b>🔧 Ресурсы:</b> всё по нулям{% endif %}{% endif %}
+{% if is_scout %}
+  <b>🔧 Стоимость:</b> {{ res_row("🧠","информация",r.information|default(1)) }}
+{% elif resources_only_info %}
+  <b>🔧 Ресурсы:</b> {{ res_row("🧠","информация",r.information) }}
+{% elif is_ritual %}
+  <b>🔧 Ресурсы:</b> {{ res_row("🕯","свечи", r.candles) }}   {# ← ТОЛЬКО тут показываем свечи #}
+{% elif show_resources_all %}
+  {% if nonzero(r) %}
+  <b>🔧 Ресурсы:</b>
+  {{ res_row("💪","сила",r.force) }}
+  {{ res_row("💰","деньги",r.money) }}
+  {{ res_row("🪙","влияние",r.influence) }}
+  {{ res_row("🧠","информация",r.information) }}
+  {% else %}
+  <b>🔧 Ресурсы:</b> всё по нулям
+  {% endif %}
+{% endif %}
 
 {% if show_type %}
   {% if action.support and action.support.is_support %}

@@ -2,10 +2,9 @@ import logging
 from aiogram import types
 from sqlalchemy import select, func
 from db.session import get_session
-from db.models import User, District
+from db.models import User, District, Action, ActionStatus, ActionType
 from keyboards.spec import KeyboardParams, KeyboardSpec
 from .base import BaseScreen
-from keyboards.presets import main_menu_kb
 
 
 def ideology_bar(value: int, size: int = 11) -> str:
@@ -22,7 +21,6 @@ class ProfileScreen(BaseScreen):
         async with get_session() as session:
             user = await User.get_by_tg_id(session, tg_id)
             if user is None:
-                # на всякий: создадим, чтобы экран всегда работал
                 user = await User.create(
                     session=session,
                     tg_id=tg_id,
@@ -32,20 +30,54 @@ class ProfileScreen(BaseScreen):
                     language_code=(actor or message.from_user).language_code,
                 )
 
-            districts_count = await session.scalar(
-                select(func.count(District.id)).where(District.owner_id == user.id)
-            ) or 0
+            # --- Районы ---
+            districts = await District.get_by_owner(session, user.id)
+            districts_count = len(districts)
+            districts_view = [f"{d.name} — ОК: {d.control_points}" for d in districts]
 
-        # --- Статистика действий ---
-        pending_count = sum(1 for a in user.actions if a.status == "pending")
-        done_count = sum(1 for a in user.actions if a.status == "done")
-        failed_count = sum(1 for a in user.actions if a.status == "failed")
+            # --- Разведка: список из M2M и "сейчас скаутится" по pending-экшену ---
+            scouts = list(user.scouts_districts)  # lazy="selectin" подтянет внутри сессии
+            scouts_view = [f"{d.name}" for d in scouts]
 
-        # --- Последние действия (по created_at, максимум 5) ---
-        recent_actions = [
-            f"({a.status})"
-            for a in sorted(user.actions, key=lambda x: x.created_at, reverse=True)[:5]
-        ]
+            current_scout_stmt = (
+                select(Action)
+                .where(
+                    Action.owner_id == user.id,
+                    Action.status == ActionStatus.PENDING,
+                    Action.type.in_([ActionType.SCOUT_DISTRICT, ActionType.SCOUT_INFO]),
+                    Action.district_id.is_not(None),
+                )
+                .order_by(Action.created_at.desc())
+                .limit(1)
+            )
+            current_scout_action = (await session.execute(current_scout_stmt)).scalars().first()
+            current_scout_name = current_scout_action.district.name if current_scout_action and current_scout_action.district else None
+
+            # --- Статистика действий ---
+            stats_stmt = (
+                select(Action.status, func.count())
+                .where(
+                    Action.owner_id == user.id,
+                    Action.status.in_([ActionStatus.PENDING, ActionStatus.DONE, ActionStatus.FAILED]),
+                )
+                .group_by(Action.status)
+            )
+            stats_rows = (await session.execute(stats_stmt)).all()
+            stats_map = {status: int(cnt) for status, cnt in stats_rows}
+            pending_count = stats_map.get(ActionStatus.PENDING, 0)
+            done_count = stats_map.get(ActionStatus.DONE, 0)
+            failed_count = stats_map.get(ActionStatus.FAILED, 0)
+
+            # --- Последние действия ---
+            recent_stmt = (
+                select(Action)
+                .where(Action.owner_id == user.id)
+                .order_by(Action.created_at.desc())
+                .limit(5)
+            )
+            recent_actions = [
+                f"({a.status.value})" for a in (await session.execute(recent_stmt)).scalars().all()
+            ]
 
         profile = {
             "name": user.in_game_name or user.username or str(user.tg_id),
@@ -68,6 +100,13 @@ class ProfileScreen(BaseScreen):
             "districts": {
                 "count": districts_count,
                 "has_any": districts_count > 0,
+                "list": districts_view,
+            },
+            "scouting": {
+                "active_count": len(scouts),
+                "has_any": len(scouts) > 0,
+                "list": scouts_view,
+                "current": current_scout_name,  # None или название района
             },
             "actions_stats": {
                 "pending": pending_count,
@@ -80,9 +119,9 @@ class ProfileScreen(BaseScreen):
         return {
             "profile": profile,
             "keyboard": KeyboardSpec(
-                            type="inline",
-                            name="profile_menu",
-                            options=["back"],
-                            params=KeyboardParams(max_in_row=2),
-                        ),
+                type="inline",
+                name="profile_menu",
+                options=["back"],
+                params=KeyboardParams(max_in_row=2),
+            ),
         }

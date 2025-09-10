@@ -17,7 +17,7 @@ def actions_menu_kb() -> KeyboardSpec:
     return KeyboardSpec(
         type="inline",
         name="actions_menu",
-        options=["defend", "attack", "scout", "communicate", ["actions_list"], ["back"]],
+        options=["defend", "attack", "scout", "communicate", ["ritual"], ["actions_list"], ["back"]],
         params=KeyboardParams(max_in_row=2)
     )
 
@@ -48,13 +48,13 @@ def action_district_list_kb(action) -> KeyboardSpec:
 
 
 def action_setup_kb(
-    resources: List[str],
-    action_id: int,
-    action_status: ActionStatus | str,
-    *,
-    communicate: bool = False,
-    is_help: bool = False,
-    is_list: bool = False,           # <--- НОВОЕ
+        resources: List[str],
+        action_id: int,
+        action_status: ActionStatus | str,
+        *,
+        communicate: bool = False,
+        is_help: bool = False,
+        is_list: bool = False,  # <--- НОВОЕ
 ) -> KeyboardSpec:
     """
     Строит inline-клавиатуру для настройки действия.
@@ -113,7 +113,6 @@ def action_setup_kb(
     )
 
 
-
 def scout_choice_kb() -> KeyboardSpec:
     rows: List[RowOrName] = [["scout_district", "scout_info"], ["back"]]
     button_params = {
@@ -161,4 +160,19 @@ def news_list_kb(disabled: bool = False) -> KeyboardSpec:
         name="news_list_menu",
         options=opts,
         params=KeyboardParams(max_in_row=2),
+    )
+
+
+def winlose_kb(action_id: str) -> KeyboardSpec:
+    rows: List[RowOrName] = [["i_won", "i_lost"]]
+    button_params = {
+        "i_won": {"action": action_id},
+        "i_lost": {"action": action_id},
+    }
+    return KeyboardSpec(
+        type="inline",
+        name="winlose_menu",
+        options=rows,
+        params=KeyboardParams(max_in_row=2),
+        button_params=button_params,
     )

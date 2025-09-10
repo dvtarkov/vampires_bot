@@ -177,15 +177,27 @@ class SettingsActionScreen(BaseScreen):
                     .where(Action.owner_id == user.id)
                     .order_by(Action.updated_at.desc(), Action.id.desc())
                 )
+                ALIASES = {
+                    "success": "done",
+                    "fail": "failed",
+                }
 
                 # Нормализуем статусы и применим фильтр
                 if statuses:
-                    norm: List[ActionStatus] = []
+                    norm: list[ActionStatus] = []
+                    seen: set[ActionStatus] = set()
+
                     for s in statuses:
+                        v = ALIASES.get(s.lower(), s.lower())
                         try:
-                            norm.append(ActionStatus(s.lower()))
-                        except Exception:
+                            st = ActionStatus(v)
+                        except ValueError:
                             logging.warning("Unknown status filter: %s", s)
+                            continue
+                        if st not in seen:  # без дублей
+                            norm.append(st)
+                            seen.add(st)
+
                     if norm:
                         query = query.where(Action.status.in_(norm))
 
@@ -293,6 +305,7 @@ class SettingsActionScreen(BaseScreen):
                         "money": action_obj.money,
                         "influence": action_obj.influence,
                         "information": action_obj.information,
+                        "candles": getattr(action_obj, "candles", 0),  # ← добавлено
                     },
                     "support": support,
                     "ui": {
@@ -396,7 +409,20 @@ class SettingsActionScreen(BaseScreen):
                 communicate=True,
                 is_list=is_list,
             )
+        elif kind == "ritual":
+            # как communicate, но главный ресурс — candles; район не выбираем
+            action_ctx["ui"]["show_type_switch"] = False
+            action_ctx["ui"]["show_district"] = False
+            action_ctx["ui"]["resources_editable"] = True
 
+            resources_for_kb = ["candles"]
+            keyboard = action_setup_kb(
+                resources_for_kb,
+                action_ctx["id"],
+                action_ctx["status"],
+                is_list=is_list,
+                communicate=True,
+            )
         else:
             # запасной вариант — как defend
             keyboard = action_setup_kb(

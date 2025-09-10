@@ -1,15 +1,17 @@
 {
   "on_point_bonus": 20,
+
   "attack": {
-    "force": 1.0,
-    "money": 0.1,
-    "influence": 0.05,
-    "information": 0.05
+    "force": 10,
+    "money": 5,
+    "influence": 1,
+    "information": 1
   },
+
   "defense": {
-    "force": 1.0,
-    "money": 0.1,
-    "influence": 0.05,
-    "information": 0.05
+    "force": 10,
+    "money": 5,
+    "influence": 1,
+    "information": 1
   }
 }

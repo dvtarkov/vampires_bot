@@ -1,0 +1,11 @@
+<b>{{ ritual.title }}</b>
+
+{% for line in ritual.lines %}
+• {{ line }}
+{% endfor %}
+
+{% if ritual.error_text %}
+❗ <b>Ошибка:</b> {{ ritual.error_text }}
+{% endif %}
+
+<i>{{ ritual.hint }}</i>

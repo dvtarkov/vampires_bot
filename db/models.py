@@ -197,6 +197,7 @@ class District(Base):
 
     # Название района
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    #address: Mapped[str] = mapped_column(String(500), nullable=False, default=None)
 
     # Владелец
     owner_id: Mapped[int] = mapped_column(
@@ -390,6 +391,8 @@ class ActionType(PyEnum):
     SCOUT_DISTRICT = "scout_dist"
     SCOUT_INFO = "scout_info"
 
+    RITUAL = "ritual"
+
 
 class ActionStatus(PyEnum):
     DRAFT = "draft"
@@ -458,10 +461,11 @@ class Action(Base):
     money: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     influence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     information: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    candles: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     estimated_power: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     on_point: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
+    won_on_point: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
