@@ -27,6 +27,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 importlib.import_module("db.models")
+
+from db.models import Action
 # ---------- утилиты ----------
 def to_jsonable(v: Any) -> Any:
     if v is None: return None
@@ -123,20 +125,29 @@ def get_ws(gc: gspread.Client, spreadsheet_id: str, title: str, ncols: int) -> g
         return sh.add_worksheet(title=title[:100], rows=1, cols=max(ncols, 1))
 
 # ---------- сборка строк ----------
-def objects_to_dataframe(objs: List[Any], cols: List[str], rels: List[tuple]) -> pd.DataFrame:
+def objects_to_dataframe(objs: List[Any], cols: List[str], rels: List[tuple], *, model: Type) -> pd.DataFrame:
     extended_cols = cols.copy()
-    # добавляем колонки для связей
     for key, uselist in rels:
         extended_cols.append(f"{key}__names" if uselist else f"{key}__name")
 
     rows = []
     for obj in objs:
         row: Dict[str, Any] = {}
-        # БД-колонки 1:1
+        # 1:1 поля
         for c in cols:
-            row[c] = to_jsonable(getattr(obj, c))
+            v = getattr(obj, c)
 
-        # Связи → имена
+            # ✅ НОРМАЛИЗАЦИЯ ТОЛЬКО ДЛЯ Action.status / Action.type
+            if (model is Action or getattr(model, "__tablename__", "") == getattr(Action, "__tablename__", "actions")) and c in ("status", "type"):
+                # берём «человеческое» значение (enum.value или str) и апперкейсим
+                if hasattr(v, "value"):
+                    v = v.value
+                v = (str(v) if v is not None else "").strip().upper()
+                row[c] = v
+            else:
+                row[c] = to_jsonable(v)
+
+        # связи → имена
         for key, uselist in rels:
             rel_val = getattr(obj, key)
             if uselist:
@@ -159,10 +170,13 @@ async def export_model(session: AsyncSession, gc: gspread.Client, model: Type):
     res = await session.execute(stmt)
     objs = list(res.scalars().all())
 
-    df = objects_to_dataframe(objs, cols, rels)
+    # ✅ Передаём model внутрь для спец-логики Action
+    df = objects_to_dataframe(objs, cols, rels, model=model)
+
     ws = get_ws(gc, SPREADSHEET_ID, tablename, ncols=len(df.columns))
     set_with_dataframe(ws, df, include_index=False, include_column_header=True, resize=True)
     print(f"[OK] {tablename}: {len(df)} rows, {len(df.columns)} columns (with relationships)")
+
 
 async def main():
     engine = create_async_engine(DB_URL, echo=False, pool_pre_ping=True)

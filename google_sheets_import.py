@@ -20,6 +20,8 @@ from db.session import Base
 # ВАЖНО: загрузить модели, чтобы мапперы зарегистрировались
 importlib.import_module("db.models")
 
+from db.models import Action
+
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 DB_URL = os.environ["DATABASE_URL"]
 SA_PATH = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
@@ -95,8 +97,13 @@ def convert_value(sa_col, val: Any):
 
     coltype = sa_col.type
 
+    # SAEnum возвращаем как есть — нормализацию сделаем отдельно ТОЛЬКО для Action.status/type
+    from sqlalchemy import Enum as SAEnum
     if isinstance(coltype, SAEnum):
-        return val  # оставляем строку как есть (как экспортировали)
+        return val
+
+    from sqlalchemy import Integer, BigInteger, Float, Boolean, DateTime, String, Text
+    from sqlalchemy import JSON as SAJSON
 
     if isinstance(coltype, (Integer, BigInteger)):
         try:
@@ -130,6 +137,7 @@ def convert_value(sa_col, val: Any):
     if isinstance(coltype, SAJSON):
         if isinstance(val, (dict, list)): return val
         try:
+            import json
             return json.loads(val)
         except Exception:
             return None
@@ -138,6 +146,18 @@ def convert_value(sa_col, val: Any):
         return str(val)
 
     return val
+
+def _normalize_action_payload(model, payload: dict) -> dict:
+    """Только для Action: приводим status/type к UPPERCASE, если они есть и строковые."""
+    try:
+        if model is Action or getattr(model, "__tablename__", "") == getattr(Action, "__tablename__", "actions"):
+            for key in ("status", "type"):
+                if key in payload and isinstance(payload[key], str) and payload[key].strip():
+                    payload[key] = payload[key].strip().upper()
+    except Exception:
+        # не мешаем импорту из-за мелочей
+        pass
+    return payload
 
 def model_columns_dict(model: Type):
     # name -> Column
@@ -150,7 +170,6 @@ async def upsert_rows(session: AsyncSession, model: Type, df: pd.DataFrame):
     has_updated = "updated_at" in cols
     id_col_present = "id" in cols
 
-    # берём только реальные колонки модели и игнорим __name/__names
     valid_cols = [c for c in df.columns if c in cols and not is_rel_name_col(c)]
 
     def build_update_payload(row: pd.Series) -> Dict[str, Any]:
@@ -158,18 +177,20 @@ async def upsert_rows(session: AsyncSession, model: Type, df: pd.DataFrame):
         for c in valid_cols:
             raw = row[c]
             if is_empty_cell(raw):
-                continue  # пусто -> не трогаем колонку
+                continue
             val = convert_value(cols[c], raw)
-
-            # если конвертация дала None и колонка NOT NULL — не трогаем её
             if val is None and is_non_nullable(cols[c]):
                 continue
-
             payload[c] = val
+
+        # 👇 НОРМАЛИЗАЦИЯ ТОЛЬКО ДЛЯ ACTION
+        payload = _normalize_action_payload(model, payload)
+
         if has_updated:
             payload["updated_at"] = now_utc()
+        # created_at при UPDATE обычно не трогаем, но оставляю как было у вас:
         if has_created:
-            payload["created_at"] = now_utc()
+            payload.setdefault("created_at", now_utc())
         return payload
 
     def build_insert_payload(row: pd.Series) -> Dict[str, Any]:
@@ -177,25 +198,20 @@ async def upsert_rows(session: AsyncSession, model: Type, df: pd.DataFrame):
         for c in valid_cols:
             raw = row[c]
             if is_empty_cell(raw):
-                # попробуем подставить python-default из модели
                 pdflt = get_python_default(cols[c])
                 if pdflt is not None:
                     payload[c] = pdflt
-                # иначе не кладём ключ — пусть БД/серверный default сработает,
-                # либо проверим позже обязательность
                 continue
             payload[c] = convert_value(cols[c], raw)
 
-        # server time
+        # 👇 НОРМАЛИЗАЦИЯ ТОЛЬКО ДЛЯ ACTION
+        payload = _normalize_action_payload(model, payload)
+
         if has_updated:
             payload["updated_at"] = now_utc()
         if has_created:
             payload["created_at"] = now_utc()
 
-        # Для non-nullable колонок без значения и без server_default —
-        # подставим python-default, если есть. Если нет — оставим как есть:
-        # SQLite/PG упадут понятной ошибкой, что поможет увидеть,
-        # какой столбец обязателен.
         for name, c in cols.items():
             if name in payload or is_rel_name_col(name):
                 continue
