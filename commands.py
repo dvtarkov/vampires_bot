@@ -53,7 +53,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./game.db")
 COMBAT_RATES_PATH = os.getenv("COMBAT_RATES_PATH", "./config/combat_rates.json")
 
 ATTACK_KIND = "attack"
-DEFENSE_KIND = "defense"
+DEFENSE_KIND = "defend"
 SCOUT_KINDS = {"scout_dist", "scout_info"}
 
 ORDER_ATTACKS_ASC = True  # порядок атак по created_at
@@ -289,26 +289,112 @@ def resources_to_points(kind: str, action: Action, rates: CombatRates) -> int:
 #  CONTESTED DETECTION
 # ===========================
 async def detect_contested_districts(session: AsyncSession) -> List[int]:
-    """Определяет «спорные» районы (есть on_point атака и on_point защита)."""
-    with StepTimer("Поиск спорных районов"):
-        stmt_att = select(Action.district_id).where(
-            Action.status == ActionStatus.PENDING,
-            Action.kind == ATTACK_KIND,
-            Action.on_point.is_(True),
-            Action.district_id.is_not(None),
+    """
+    Спорные районы:
+      • есть >=2 атак с moving_on_point, ИЛИ
+      • есть >=1 атака и >=1 защита с moving_on_point.
+    Дополнительно: рассылает авторам on-point действий вопрос "Вы победили?".
+    """
+    with StepTimer("Поиск спорных районов (moving_on_point + уведомления)"):
+        # moving_on_point — если поля нет, используем on_point как фолбэк
+        ONP = getattr(Action, "moving_on_point", Action.on_point)
+
+        # Забираем все pending on-point атаки/защиты по районам
+        stmt = (
+            select(Action.id, Action.owner_id, Action.district_id, Action.kind)
+            .where(
+                Action.status == ActionStatus.PENDING,
+                Action.district_id.is_not(None),
+                ONP.is_(True),
+                Action.kind.in_([ATTACK_KIND, DEFENSE_KIND]),
+            )
         )
-        stmt_def = select(Action.district_id).where(
-            Action.status == ActionStatus.PENDING,
-            Action.kind == DEFENSE_KIND,
-            Action.on_point.is_(True),
-            Action.district_id.is_not(None),
-        )
-        att = await session.execute(stmt_att)
-        defs = await session.execute(stmt_def)
-        att_set = set(x for x in att.scalars().all() if x is not None)
-        def_set = set(x for x in defs.scalars().all() if x is not None)
-        contested = sorted(att_set & def_set)
+        res = await session.execute(stmt)
+        rows: list[tuple[int, int, int, str]] = list(res.all())
+
+        # Разложим по районам
+        by_district: dict[int, dict[str, list[tuple[int, int]]]] = defaultdict(lambda: {"attack": [], "defense": []})
+        for a_id, owner_id, district_id, kind in rows:
+            did = int(district_id)
+            if str(kind) == ATTACK_KIND:
+                by_district[did]["attack"].append((int(a_id), int(owner_id)))
+            else:
+                by_district[did]["defense"].append((int(a_id), int(owner_id)))
+
+        # Правила спорности
+        contested = []
+        for did, kinds in by_district.items():
+            a_cnt = len(kinds["attack"])
+            d_cnt = len(kinds["defense"])
+            if a_cnt >= 2 or (a_cnt >= 1 and d_cnt >= 1):
+                contested.append(did)
+
+        contested = sorted(set(contested))
         log.info("Спорных районов: %d (%s)", len(contested), contested)
+
+        # Если нет спорных — можно сразу вернуть
+        if not contested:
+            return contested
+
+        # Подготовим данные для уведомлений
+        # 1) карта районов -> имя
+        dq = await session.execute(
+            select(District.id, District.name).where(District.id.in_(contested))
+        )
+        district_names = {int(i): n for i, n in dq.all()}
+
+        # 2) список всех on-point действий в спорных районах
+        notify_actions: list[tuple[int, int, int]] = []
+        for did in contested:
+            notify_actions.extend((aid, uid, did) for aid, uid in by_district[did]["attack"])
+            notify_actions.extend((aid, uid, did) for aid, uid in by_district[did]["defense"])
+
+        # 3) пользователи -> tg_id
+        owner_ids = sorted({uid for _, uid, _ in notify_actions})
+        uq = await session.execute(select(User.id, User.tg_id).where(User.id.in_(owner_ids)))
+        users_map = {int(i): int(tg) for i, tg in uq.all() if tg is not None}
+
+        # 4) пытаемся отправить интерактивный экран; если нет — шлём простое уведомление
+        try:
+            from app import bot  # type: ignore
+        except Exception:
+            bot = None
+            log.warning("Бот недоступен: уведомления AskWhoWon пропущены.")
+
+        AskWhoWon = None
+        if bot:
+            try:
+                # поправьте путь импорта при необходимости
+                from screens.notify_screen import AskWhoWonScreen  # type: ignore
+                AskWhoWon = AskWhoWonScreen
+            except Exception:
+                AskWhoWon = None
+
+        title = "⚔️ Спорный бой"
+        # Рассылка
+        if bot:
+            for action_id, owner_id, did in notify_actions:
+                tg_id = users_map.get(owner_id)
+                if not tg_id:
+                    continue
+                body = f"В районе «{district_names.get(did, str(did))}» было несколько движений на точку. Вы победили?"
+                try:
+                    if AskWhoWon:
+                        await AskWhoWon().run(
+                            message=None,
+                            actor=None,
+                            state=None,
+                            title=title,
+                            body=body,
+                            action_id=action_id,
+                            bot=bot,
+                            chat_id=tg_id
+                        )
+                    else:
+                        await notify_user(bot, tg_id, title=title, body=body)
+                except Exception:
+                    log.exception("Не удалось отправить AskWhoWon (action_id=%s, owner_id=%s)", action_id, owner_id)
+
         return contested
 
 
@@ -796,6 +882,123 @@ async def grant_users_base_resources(session: AsyncSession):
                     # не валим цикл из-за одного неотправленного сообщения
                     log.exception("Не удалось отправить нотификацию о базовых ресурсах пользователю #%s", uid)
 
+async def process_politician_influence(session: AsyncSession) -> None:
+    """Обрабатывает pending-заявки вида 'influence' и меняет идеологию политиков."""
+    with StepTimer("Обработка влияния на политиков"):
+        # Бот для уведомлений (если есть)
+        try:
+            from app import bot  # type: ignore
+        except Exception:
+            bot = None
+            log.warning("Бот недоступен: уведомления о влиянии отправляться не будут.")
+
+        # 1) Собираем заявки influence, старые → новые
+        stmt = (
+            select(Action)
+            .where(
+                Action.status == ActionStatus.PENDING,
+                Action.kind == "influence",     # ключевой признак
+                # при желании можно усилить фильтр:
+                # Action.type == ActionType.INFLUENCE
+            )
+            .order_by(Action.created_at.asc())
+        )
+        res = await session.execute(stmt)
+        acts: List[Action] = list(res.scalars().all())
+        log.info("Активных influence-заявок: %d", len(acts))
+        if not acts:
+            return
+
+        # 2) Кэш политиков по районам
+        district_ids = sorted({a.district_id for a in acts if a.district_id is not None})
+        pol_by_district: Dict[int, Politician] = {}
+        pol_by_id: Dict[int, Politician] = {}
+        ideology_map: Dict[int, int] = {}
+
+        if district_ids:
+            pq = await session.execute(
+                select(Politician).where(Politician.district_id.in_(district_ids))
+            )
+            pols = list(pq.scalars().all())
+            for p in pols:
+                if p.district_id is not None:
+                    pol_by_district[p.district_id] = p
+                pol_by_id[p.id] = p
+                ideology_map[p.id] = int(p.ideology or 0)
+
+        processed_ids: List[int] = []
+        changed_pids: set[int] = set()
+        notify_pairs: set[tuple[int, int]] = set()  # (user_id, politician_id)
+
+        # 3) Применяем влияние к temp-идеологии
+        for a in acts:
+            did = a.district_id
+            p = pol_by_district.get(did) if did is not None else None
+            processed_ids.append(a.id)  # заявку закрываем в любом случае
+
+            if not p:
+                log.debug("Influence action #%s: нет политика для района %s", a.id, did)
+                continue
+
+            amt = max(0, int(a.influence or 0))
+            cur_val = ideology_map.get(p.id, int(p.ideology or 0))
+
+            if a.is_positive is True:
+                cur_val += amt
+            elif a.is_positive is False:
+                cur_val -= amt
+            else:
+                log.debug("Influence action #%s: is_positive=None, изменение пропущено", a.id)
+
+            ideology_map[p.id] = cur_val
+            changed_pids.add(p.id)
+            notify_pairs.add((a.owner_id, p.id))
+
+        # 4) Закрываем заявки
+        if processed_ids:
+            await session.execute(
+                update(Action)
+                .where(Action.id.in_(processed_ids))
+                .values(status=ActionStatus.DONE, updated_at=now_utc())
+            )
+            await session.commit()
+            log.info("Закрыто influence-заявок: %d", len(processed_ids))
+
+        # 5) Квантуем идеологию в [-5..5] и сохраняем в БД
+        if changed_pids:
+            for pid in changed_pids:
+                p = pol_by_id.get(pid)
+                if not p:
+                    continue
+                new_val = ideology_map.get(pid, p.ideology)
+                new_val = max(-5, min(5, int(new_val)))
+                if p.ideology != new_val:
+                    log.debug("Политик #%s (%s): идеология %s → %s", p.id, p.name, p.ideology, new_val)
+                    p.ideology = new_val
+
+            await session.commit()
+            log.info("Обновлена идеология у %d политиков.", len(changed_pids))
+
+        # 6) Уведомления авторам заявок
+        if bot and notify_pairs:
+            user_ids = sorted({uid for uid, _ in notify_pairs})
+            uq = await session.execute(select(User).where(User.id.in_(user_ids)))
+            users_map = {u.id: u for u in uq.scalars().all()}
+
+            for uid, pid in sorted(notify_pairs):
+                user = users_map.get(uid)
+                pol = pol_by_id.get(pid)
+                if not user or not pol:
+                    continue
+                try:
+                    await notify_user(
+                        bot,
+                        user.tg_id,
+                        title="🏛️ Влияние учтено",
+                        body=f"Ваши действия повлияли на политика «{pol.name}».",
+                    )
+                except Exception:
+                    log.exception("Не удалось отправить уведомление о влиянии (user_id=%s, pol_id=%s)", uid, pid)
 
 # ===========================
 #    GRANT RESOURCES
@@ -947,6 +1150,9 @@ async def run_game_cycle():
             with StepTimer("Шаг 2.5: Остаток обороны → CP"):
                 await convert_leftover_defense_to_control_points(session, defense_pool, contested)
 
+            with StepTimer("Шаг 2.6: Влияние на политиков"):
+                await process_politician_influence(session)
+
             with StepTimer("Шаг 3: Закрыть все разведки"):
                 await close_all_scouting(session)
 
@@ -963,6 +1169,11 @@ async def run_game_cycle():
                 await refresh_player_actions(session)
 
             log.info("=== Игровой цикл завершён ===")
+            try:
+                Path("last_cycle_finished.txt").write_text(now_utc().isoformat(), encoding="utf-8")
+                log.info("Записан маркер завершения цикла: last_cycle_finished.txt")
+            except Exception:
+                log.exception("Не удалось записать last_cycle_finished.txt")
 
         except Exception:
             log.exception("Игровой цикл завершился с ошибкой")

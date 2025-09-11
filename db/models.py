@@ -392,6 +392,7 @@ class ActionType(PyEnum):
     SCOUT_INFO = "scout_info"
 
     RITUAL = "ritual"
+    INFLUENCE = "influence"
 
 
 class ActionStatus(PyEnum):
@@ -465,7 +466,10 @@ class Action(Base):
 
     estimated_power: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     on_point: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    won_on_point: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    won_on_point: Mapped[bool] = mapped_column(Boolean, default=None, nullable=True)
+
+    is_positive: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True, default=None)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -492,7 +496,8 @@ class Action(Base):
             force: int = 0,
             money: int = 0,
             influence: int = 0,
-            information: int = 0
+            information: int = 0,
+            is_positive: bool = True,
     ) -> "Action":
         obj = cls(
             owner_id=owner_id,
@@ -505,7 +510,8 @@ class Action(Base):
             force=force,
             money=money,
             influence=influence,
-            information=information
+            information=information,
+            is_positive=is_positive
         )
         session.add(obj)
         await session.commit()

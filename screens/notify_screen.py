@@ -55,6 +55,7 @@ class AskWhoWonScreen(BaseScreen):
         *,
         title: str,
         body: str,
+        action_id: int,
         **kwargs
     ):
         # ничего особенного — просто отдаём контекст в шаблон
@@ -69,10 +70,8 @@ class AskWhoWonScreen(BaseScreen):
             "bot": kwargs.get("bot"),
             "chat_id": kwargs.get("chat_id"),
             "notify": ctx,
-            "render_kind": "notice",
             "force_new": True,
-            "persist_key": kwargs.get("persist_key", "notice"),
-            "keyboard": winlose_kb(kwargs.get("action_id")),
+            "keyboard": winlose_kb(str(action_id)),
         }
 
 

@@ -17,7 +17,7 @@ def actions_menu_kb() -> KeyboardSpec:
     return KeyboardSpec(
         type="inline",
         name="actions_menu",
-        options=["defend", "attack", "scout", "communicate", ["ritual"], ["actions_list"], ["back"]],
+        options=["defend", "attack", "scout", "communicate", "ritual", "influence", ["actions_list"], ["back"]],
         params=KeyboardParams(max_in_row=2)
     )
 
@@ -55,6 +55,7 @@ def action_setup_kb(
         communicate: bool = False,
         is_help: bool = False,
         is_list: bool = False,  # <--- НОВОЕ
+        influence: bool = False,
 ) -> KeyboardSpec:
     """
     Строит inline-клавиатуру для настройки действия.
@@ -65,13 +66,16 @@ def action_setup_kb(
     # ---- основное содержимое по статусу ----
     if action_status is ActionStatus.DRAFT or action_status == "draft":
         if not communicate:
-            if not is_help:
+            if not is_help and not influence:
                 rows.append(["collective", "individual"])
+            if influence:
+                rows.append(["decrease", "increase"])
             for res in resources:
                 res = res.strip()
                 if res:
                     rows.append([f"{res}_remove", res, f"{res}_add"])
-            rows.append(["moving_on_point"])
+            if not influence:
+                rows.append(["moving_on_point"])
             rows.append(["done"])
             rows.append(["delete", "back"])
         else:
@@ -166,8 +170,8 @@ def news_list_kb(disabled: bool = False) -> KeyboardSpec:
 def winlose_kb(action_id: str) -> KeyboardSpec:
     rows: List[RowOrName] = [["i_won", "i_lost"]]
     button_params = {
-        "i_won": {"action": action_id},
-        "i_lost": {"action": action_id},
+        "i_won": {"action_id": action_id},
+        "i_lost": {"action_id": action_id},
     }
     return KeyboardSpec(
         type="inline",
@@ -175,4 +179,20 @@ def winlose_kb(action_id: str) -> KeyboardSpec:
         options=rows,
         params=KeyboardParams(max_in_row=2),
         button_params=button_params,
+    )
+
+
+def action_politician_list_kb(action: str | None = None) -> KeyboardSpec:
+    btns = {
+        "menu_prev": {"action": action},
+        "menu_pick": {"action": action},
+        "menu_next": {"action": action},
+        "menu_back": {},
+    }
+    return KeyboardSpec(
+        type="inline",
+        name="action_politician",
+        options=btns.keys(),
+        params=KeyboardParams(max_in_row=3),
+        button_params=btns,
     )

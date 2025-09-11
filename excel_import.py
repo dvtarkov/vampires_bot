@@ -322,7 +322,7 @@ async def _import_politicians(ws) -> int:
     processed = 0
     async with get_session() as session:
         for row in _iter_rows(ws, (
-            "id","name","role_and_influence","district_id","ideology","influence","bonuses_penalties",
+            "id","name","role_and_influence","ideology","influence","bonuses_penalties",
         )):
             name = _to_str_or_none(row.get("name"))
             role = _to_str_or_none(row.get("role_and_influence"))

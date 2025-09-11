@@ -273,11 +273,18 @@ class SettingsActionScreen(BaseScreen):
 
             # --- 3) Сбор контекста для шаблона ---
             if action_obj:
+                # загрузим политика, если у действия есть район
+                pol = None
+                if action_obj.district_id:
+                    pol = (await session.execute(
+                        select(Politician).where(Politician.district_id == action_obj.district_id)
+                    )).scalars().first()
+
                 district_name = action_obj.district.name if action_obj.district else None
                 owner_name = (
-                    action_obj.owner.in_game_name
-                    or action_obj.owner.username
-                    or str(user.tg_id)
+                        action_obj.owner.in_game_name
+                        or action_obj.owner.username
+                        or str(user.tg_id)
                 )
 
                 support = {
@@ -287,8 +294,10 @@ class SettingsActionScreen(BaseScreen):
                     "children_count": len(action_obj.support_actions) if action_obj.support_actions is not None else 0,
                 }
 
-                status_str = action_obj.status.value if isinstance(action_obj.status, ActionStatus) else (action_obj.status or "draft")
-                type_str = action_obj.type.value if isinstance(action_obj.type, ActionType) else (action_obj.type or "individual")
+                status_str = action_obj.status.value if isinstance(action_obj.status, ActionStatus) else (
+                            action_obj.status or "draft")
+                type_str = action_obj.type.value if isinstance(action_obj.type, ActionType) else (
+                            action_obj.type or "individual")
 
                 action_ctx = {
                     "id": action_obj.id,
@@ -305,7 +314,7 @@ class SettingsActionScreen(BaseScreen):
                         "money": action_obj.money,
                         "influence": action_obj.influence,
                         "information": action_obj.information,
-                        "candles": getattr(action_obj, "candles", 0),  # ← добавлено
+                        "candles": getattr(action_obj, "candles", 0),
                     },
                     "support": support,
                     "ui": {
@@ -314,6 +323,22 @@ class SettingsActionScreen(BaseScreen):
                         "resources_editable": True,
                     },
                     "text": action_obj.text,
+
+                    # ← ДОБАВЛЕНО: признак позитив/негатив для influence-экшенов
+                    "is_positive": action_obj.is_positive,
+
+                    # ← ДОБАВЛЕНО: контекст политика (один-ко-одному по district_id)
+                    "politician": (
+                        {
+                            "id": pol.id,
+                            "name": pol.name,
+                            "role_and_influence": pol.role_and_influence,
+                            "ideology": pol.ideology,
+                            "ideology_bar": ideology_bar(pol.ideology),
+                            "influence": pol.influence,
+                            "bonuses_penalties": pol.bonuses_penalties or "",
+                        } if pol else None
+                    ),
                 }
             else:
                 # Если вообще нечего показать — минимальный контекст + back
@@ -422,6 +447,19 @@ class SettingsActionScreen(BaseScreen):
                 action_ctx["status"],
                 is_list=is_list,
                 communicate=True,
+            )
+        elif kind == "influence":
+            action_ctx["ui"]["show_type_switch"] = False
+            action_ctx["ui"]["show_district"] = False  # район уже задан при выборе политика
+            action_ctx["ui"]["resources_editable"] = True
+
+            resources_for_kb = ["influence"]
+            keyboard = action_setup_kb(
+                resources_for_kb,
+                action_ctx["id"],
+                action_ctx["status"],
+                is_list=is_list,
+                influence=True
             )
         else:
             # запасной вариант — как defend

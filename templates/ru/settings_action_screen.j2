@@ -1,11 +1,13 @@
 {# templates/ru/action_settings.j2 #}
 {% set status_emoji = {"draft":"⚪️","pending":"🟡","done":"✅","failed":"❌"} %}
 {% set status_ru = {"draft":"черновик","pending":"в ожидании","done":"выполнено","failed":"провалено"} %}
-{% set kind_emoji = {"defend":"🛡️","attack":"⚔️","scout":"🕵️","communicate":"🗞️"} %}
-{% set kind_ru = {"defend":"Оборона","attack":"Атака","scout":"Разведка","communicate":"Коммуникация"} %}
+{% set kind_emoji = {"defend":"🛡️","attack":"⚔️","scout":"🕵️","communicate":"🗞️","ritual":"🕯","influence":"🏛️"} %}
+{% set kind_ru = {"defend":"Оборона","attack":"Атака","scout":"Разведка","communicate":"Коммуникация","ritual":"Ритуал","influence":"Влияние"} %}
 {% set type_ru = {"individual":"индивидуальная","collective":"коллективная","support":"помощь"} %}
+
 {% macro res_row(icon,label_ru,value) -%}{{ icon }} {{ label_ru }}: <b>{{ value|default(0) }}</b>{%- endmacro %}
 {% macro nonzero(r) -%}{{ (r.force|default(0)) or (r.money|default(0)) or (r.influence|default(0)) or (r.information|default(0)) }}{%- endmacro %}
+
 {% set kind = (action.kind or '')|lower %}
 {% set show_district = kind in ['defend','attack'] %}
 {% set show_type = kind in ['defend','attack'] %}
@@ -13,6 +15,7 @@
 {% set resources_only_info = kind == 'communicate' %}
 {% set is_scout = kind == 'scout' %}
 {% set is_ritual = kind == 'ritual' %}
+{% set is_influence = kind == 'influence' %}
 
 <b>{{ kind_emoji.get(kind,"❔") }} Действие: {{ kind_ru.get(kind,action.kind) }}</b>{% if action.id %} <i>(#{{ action.id }})</i>{% endif %}
 Статус: {{ status_emoji.get(action.status|default('pending'),"🟡") }} <b>{{ status_ru.get(action.status,action.status) }}</b>
@@ -23,6 +26,23 @@
 {% if show_district and action.on_point is defined %}<b>На точке:</b> {{ "да" if action.on_point else "нет" }}{% endif %}
 <b>Время:</b> создано {{ action.created_human|default("—") }}, обновлено {{ action.updated_human|default("—") }}
 
+{# ==== Карточка политика для Influence ==== #}
+{% if is_influence and action.politician %}
+<b>👤 Политик:</b> {{ action.politician.name }}{% if action.politician.id %} (#{{ action.politician.id }}){% endif %}
+{% if action.district %}
+<b>Район:</b> {{ action.district.name }}
+{% elif action.politician.district_name %}
+<b>Район:</b> {{ action.politician.district_name }}
+{% endif %}
+<b>Роль и влияние:</b> {{ action.politician.role_and_influence }}
+
+<b>Идеология:</b> {{ action.politician.ideology }} {{ action.politician.ideology_bar }}
+
+{% if action.politician.record_index is defined and action.politician.record_total is defined %}
+Запись {{ action.politician.record_index }} из {{ action.politician.record_total }}. Используйте кнопки ниже, чтобы листать и выбрать политика.
+{% endif %}
+{% endif %}
+
 {% if action.text %}{% if is_scout %}<b>Вопрос мастерам:</b>{% elif kind=='communicate' %}<b>Текст новости:</b>{% else %}<b>Комментарий:</b>{% endif %} {{ action.text }}{% endif %}
 
 {% set r = action.resources or {} %}
@@ -31,7 +51,18 @@
 {% elif resources_only_info %}
   <b>🔧 Ресурсы:</b> {{ res_row("🧠","информация",r.information) }}
 {% elif is_ritual %}
-  <b>🔧 Ресурсы:</b> {{ res_row("🕯","свечи", r.candles) }}   {# ← ТОЛЬКО тут показываем свечи #}
+  {# ВАЖНО: свечи показываем ТОЛЬКО для ритуалов #}
+  <b>🔧 Ресурсы:</b> {{ res_row("🕯","свечи", r.candles) }}
+{% elif is_influence %}
+  <b>🔧 Ресурсы:</b> {{ res_row("🪙","влияние", r.influence) }}  {# только влияние #}
+  {% set pos = action.is_positive %}
+  {% if pos is none %}
+<b>Эффект на политика:</b> ❔ <i>не указан</i>
+  {% elif pos %}
+<b>Эффект на политика:</b> ➕ <b>положительный</b>
+  {% else %}
+<b>Эффект на политика:</b> ➖ <b>отрицательный</b>
+  {% endif %}
 {% elif show_resources_all %}
   {% if nonzero(r) %}
   <b>🔧 Ресурсы:</b>
@@ -49,13 +80,18 @@
 <b>🤝 Это действие-помощь</b> Базовое действие: #{{ action.support.parent_id }} — {{ action.support.parent_title|default("без названия") }}
   {% elif action.type=="collective" %}
 <b>👥 Коллективное действие</b> Присоединившихся: <b>{{ (action.support and action.support.children_count) or 0 }}</b>
-    {# СЫРАЯ ССЫЛКА ДЛЯ ПРИСОЕДИНЕНИЯ — выводим только для коллективных pending #}
     {% if action.status == 'pending' and action.join_link %}
 <b>Ссылка для присоединения:</b> {{ action.join_link }}
     {% endif %}
   {% endif %}
 {% endif %}
 
-{% if kind in ['defend','attack'] %}<i>Используйте кнопки ниже, чтобы настроить ресурсы и выбрать район.</i>
-{% elif is_scout %}<i>Подтвердите создание разведки. Отмена после создания невозможна.</i>
-{% elif kind=='communicate' %}<i>Отправьте текст новости (тратится только информация).</i>{% endif %}
+{% if kind in ['defend','attack'] %}
+<i>Используйте кнопки ниже, чтобы настроить ресурсы и выбрать район.</i>
+{% elif is_scout %}
+<i>Подтвердите создание разведки. Отмена после создания невозможна.</i>
+{% elif kind=='communicate' %}
+<i>Отправьте текст новости (тратится только информация).</i>
+{% elif is_influence %}
+<i>Укажите знак эффекта (➕/➖) и вложите <b>влияние</b>. Район берётся из выбранного политика.</i>
+{% endif %}

@@ -3,6 +3,7 @@ from aiogram.fsm.context import FSMContext
 
 from screens.actions_stats import ActionsStatsScreen
 from screens.communicate_screen import CommunicateScreen
+from screens.politician_list import PoliticianActionList
 from screens.ritual_screen import RitualScreen
 from screens.scout_action import ScoutActionScreen
 from screens.settings_action import DistrictActionList
@@ -43,6 +44,12 @@ async def actions_menu_communicate(cb: types.CallbackQuery, state: FSMContext):
 @option("actions_menu_ritual")
 async def actions_menu_communicate(cb: types.CallbackQuery, state: FSMContext):
     await RitualScreen().run(message=cb.message, action="scout", state=state)
+    await cb.answer()
+
+
+@option("actions_menu_influence")
+async def actions_menu_communicate(cb: types.CallbackQuery, state: FSMContext):
+    await PoliticianActionList().run(message=cb.message, action="influence", state=state)
     await cb.answer()
 
 

@@ -7,18 +7,16 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-
 from .registry import option
 from db.session import get_session
 from db.models import Action, ActionType, User, ActionStatus, District
 from screens.settings_action import SettingsActionScreen
 
-
 # --- NOTIFY HELPERS -----------------------------------------------------------
 from services.notify import notify_user  # <- как мы делали ранее
 
-
 _MAX_CANDLES = 8
+
 
 def _fmt_resources(action: Action) -> str:
     parts = []
@@ -29,6 +27,7 @@ def _fmt_resources(action: Action) -> str:
     if getattr(action, "on_point", False):
         parts.append("📍 на точке")
     return ", ".join(parts) if parts else "ресурсы не указаны"
+
 
 async def _iter_district_watchers(session, district_id: int, exclude_user_id: int):
     """
@@ -82,6 +81,7 @@ async def _notify_watchers_action_started(session, bot, actor: User, action: Act
     for w in watchers:
         await notify_user(bot, w.tg_id, title=title, body=body)
 
+
 async def _notify_watchers_action_cancelled(session, bot, actor: User, action: Action, reason: str = "отменено"):
     """
     Шлём наблюдателям уведомление, что действие отменено/возвращено в черновик/удалено.
@@ -104,6 +104,8 @@ async def _notify_watchers_action_cancelled(session, bot, actor: User, action: A
     )
     for w in watchers:
         await notify_user(bot, w.tg_id, title=title, body=body)
+
+
 # -------------------------------------------------------------------------------
 
 
@@ -157,6 +159,76 @@ async def action_setup_menu_individual(cb: types.CallbackQuery, state: FSMContex
     await cb.answer("Тип изменён на индивидуальный ✅")
 
 
+@option("action_setup_menu_increase")
+async def action_setup_menu_is_positive_increase(cb: types.CallbackQuery, state: FSMContext, action_id: int, **_):
+    """
+    Устанавливает флаг is_positive=True для действия.
+    """
+    try:
+        async with get_session() as session:
+            user = (await session.execute(select(User).where(User.tg_id == cb.from_user.id))).scalars().first()
+            action = (await session.execute(select(Action).where(Action.id == action_id))).scalars().first()
+
+            if not user or not action:
+                await cb.answer("Не найдена заявка/пользователь.", show_alert=True)
+                return
+            if action.owner_id != user.id:
+                await cb.answer("Эта заявка принадлежит другому игроку.", show_alert=True)
+                return
+            if action.status in (ActionStatus.DONE, ActionStatus.FAILED, ActionStatus.DELETED):
+                await cb.answer("Действие уже зафиксировано и не может быть изменено.", show_alert=True)
+                return
+
+            if action.is_positive is True:
+                await cb.answer("Уже отмечено как позитивное ✅")
+                return
+
+            action.is_positive = True
+            await session.commit()
+
+        await _rerender(cb, state, action_id)
+        await cb.answer("Позиция отмечена как позитивная ✅")
+
+    except Exception:
+        logging.exception("action_setup_menu_is_positive_increase failed")
+        await cb.answer("Ошибка при изменении флага.", show_alert=True)
+
+
+@option("action_setup_menu_decrease")
+async def action_setup_menu_is_positive_decrease(cb: types.CallbackQuery, state: FSMContext, action_id: int, **_):
+    """
+    Устанавливает флаг is_positive=False для действия.
+    """
+    try:
+        async with get_session() as session:
+            user = (await session.execute(select(User).where(User.tg_id == cb.from_user.id))).scalars().first()
+            action = (await session.execute(select(Action).where(Action.id == action_id))).scalars().first()
+
+            if not user or not action:
+                await cb.answer("Не найдена заявка/пользователь.", show_alert=True)
+                return
+            if action.owner_id != user.id:
+                await cb.answer("Эта заявка принадлежит другому игроку.", show_alert=True)
+                return
+            if action.status in (ActionStatus.DONE, ActionStatus.FAILED, ActionStatus.DELETED):
+                await cb.answer("Действие уже зафиксировано и не может быть изменено.", show_alert=True)
+                return
+
+            if action.is_positive is False:
+                await cb.answer("Уже отмечено как негативное ⛔")
+                return
+
+            action.is_positive = False
+            await session.commit()
+
+        await _rerender(cb, state, action_id)
+        await cb.answer("Позиция отмечена как негативная ⛔")
+
+    except Exception:
+        logging.exception("action_setup_menu_is_positive_decrease failed")
+        await cb.answer("Ошибка при изменении флага.", show_alert=True)
+
+
 _RESOURCE_FIELDS = {"force", "money", "influence", "information"}
 _STEP = 1
 
@@ -198,6 +270,7 @@ async def _bump_resource(cb: types.CallbackQuery, state: FSMContext, action_id: 
     sign = "➕" if delta > 0 else "➖"
     await cb.answer(f"{sign} {field}: {current} → {new_val}")
 
+
 async def _bump_candles(cb: types.CallbackQuery, state: FSMContext, action_id: int, delta: int):
     async with get_session() as session:
         user = (await session.execute(select(User).where(User.tg_id == cb.from_user.id))).scalars().first()
@@ -237,6 +310,8 @@ async def action_setup_menu_candles_add(cb: types.CallbackQuery, state: FSMConte
 @option("action_setup_menu_candles_remove")
 async def action_setup_menu_candles_remove(cb: types.CallbackQuery, state: FSMContext, action_id: int, **_):
     await _bump_candles(cb, state, action_id, -1)
+
+
 @option("action_setup_menu_money_add")
 async def action_setup_menu_money_add(cb: types.CallbackQuery, state: FSMContext, action_id: int, **_):
     await _bump_resource(cb, state, action_id, "money", +_STEP)
@@ -352,7 +427,7 @@ async def action_setup_menu_done(cb: types.CallbackQuery, state, action_id: int,
                     return
             else:
                 total_resources = (action.money or 0) + (action.influence or 0) + (action.information or 0) + (
-                            action.force or 0)
+                        action.force or 0)
                 if total_resources <= 0 and not getattr(action, "on_point", False):
                     await cb.answer("Заявка пуста: добавьте ресурсы или включите флаг 'Едем на точку'.",
                                     show_alert=True)

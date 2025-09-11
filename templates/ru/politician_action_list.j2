@@ -1,0 +1,17 @@
+{# templates/ru/politician_action_list.j2 #}
+{% set p = politician %}
+{% set idx = (info and info.index) or 0 %}
+{% set total = (info and info.count) or 0 %}
+
+{% if not p %}
+<b>👤 Политики не найдены</b>
+<i>Вернитесь назад.</i>
+{% else %}
+<b>👤 Политик:</b> {{ p.name }}{% if p.id %} <i>(#{{ p.id }})</i>{% endif %}
+{% if p.district %}<b>Район:</b> {{ p.district }}{% endif %}
+<b>Роль и влияние:</b> {{ p.role_and_influence }}
+
+<b>Идеология:</b> {{ p.ideology }} {% if p.ideology_bar %}{{ p.ideology_bar }}{% endif %}
+
+<i>Запись {{ idx }} из {{ total }}. Используйте кнопки ниже, чтобы листать и выбрать политика.</i>
+{% endif %}
