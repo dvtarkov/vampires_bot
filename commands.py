@@ -404,15 +404,35 @@ async def detect_contested_districts(session: AsyncSession) -> List[int]:
 async def resolve_defense_pools(session: AsyncSession, rates: CombatRates, contested: List[int]) -> Dict[int, int]:
     """
     Формирует стартовый пул обороны из control_points (кроме спорных),
-    затем добавляет очки из pending defense-действий (конверсия + on_point).
+    затем добавляет очки из pending defense-действий (конверсия + on_point),
+    и уведомляет владельца района о каждой защите.
     """
     with StepTimer("Формирование обороны"):
+        # NEW: бот, если доступен
+        try:
+            from app import bot  # type: ignore
+        except Exception:
+            bot = None
+            log.warning("Бот недоступен: уведомления о защите отправляться не будут.")
+
         contested_set = set(contested)
 
         # 0) Стартовая оборона из control_points
         q = await session.execute(select(District))
         districts: List[District] = list(q.scalars().all())
         log.info("Районов в базе: %d", len(districts))
+
+        # NEW: быстрый доступ к району по id
+        district_by_id = {d.id: d for d in districts}
+
+        # NEW: кэш пользователей
+        user_cache: Dict[int, User] = {}
+
+        async def get_user(uid: int) -> Optional[User]:
+            if uid not in user_cache:
+                uq = await session.execute(select(User).where(User.id == uid))
+                user_cache[uid] = uq.scalars().first()
+            return user_cache.get(uid)
 
         defense_pool: Dict[int, int] = defaultdict(int)
         seeded_from_cp: Dict[int, int] = {}
@@ -448,10 +468,32 @@ async def resolve_defense_pools(session: AsyncSession, rates: CombatRates, conte
             did = a.district_id
             if did is None or did in contested_set:
                 continue
+
             pts = resources_to_points(DEFENSE_KIND, a, rates)
             defense_pool[did] += pts
             used_ids.append(a.id)
             log.debug("DEF@%s: +%d очков (action #%s)", did, pts, a.id)
+
+            # NEW: уведомление владельцу района о КАЖДОЙ защите
+            if bot:
+                d = district_by_id.get(did)
+                if d:
+                    owner = await get_user(d.owner_id)
+                    defender = await get_user(a.owner_id)
+                    if owner and owner.tg_id and defender:
+                        defender_name = defender.in_game_name or defender.username or f"User#{defender.id}"
+                        try:
+                            await notify_user(
+                                bot,
+                                owner.tg_id,
+                                title="🛡️ Район усилен защитой",
+                                body=(
+                                    f"Ваш район <b>{d.name}</b> защищён игроком <b>{defender_name}</b> "
+                                    f"на <b>{pts}</b> очков контроля."
+                                ),
+                            )
+                        except Exception:
+                            log.exception("Не удалось отправить уведомление о защите (did=%s, action_id=%s)", did, a.id)
 
         if used_ids:
             await session.execute(
@@ -618,7 +660,7 @@ async def resolve_attacks(session: AsyncSession, rates: CombatRates, defense_poo
                             bot,
                             defender_user.tg_id,
                             title="⚠️ Потеря района",
-                            body="Ваш район <b>{}</b> был утерян.".format(d.name),
+                            body="Ваш район <b>{}</b> был атакован {} и утерян.".format(d.name, attacker_name),
                         )
 
                 processed_ids.append(a.id)
