@@ -45,6 +45,8 @@ from db.models import (
     user_scouts_districts,
 )
 from services.notify import notify_user
+from utils.raw_body_input import add_raw_row
+
 
 # ===========================
 #    Константы/настройки
@@ -588,7 +590,12 @@ async def resolve_attacks(session: AsyncSession, rates: CombatRates, defense_poo
                 attacker_faction = (attacker.faction or "без фракции") if attacker else "неизвестно"
 
                 defender_user_before = await get_user(d.owner_id) if d.owner_id else None
-
+                defender_name_before = (
+                        defender_user_before.in_game_name
+                        or defender_user_before.username
+                        or (f"User#{defender_user_before.id}" if defender_user_before else "—")
+                ) if defender_user_before else "—"
+                def_before = current_def
                 log.debug("ATK@%s by %s: %d pts vs def %d", d.id, attacker_name, power_pts, current_def)
 
                 if power_pts <= current_def:
@@ -662,7 +669,19 @@ async def resolve_attacks(session: AsyncSession, rates: CombatRates, defense_poo
                             title="⚠️ Потеря района",
                             body="Ваш район <b>{}</b> был атакован {} и утерян.".format(d.name, attacker_name),
                         )
-
+                    try:
+                        raw_body = (
+                            f'Бой за район "{d.name}". '
+                            f'Нападающий: "{attacker_name}". '
+                            f'Оборонявшийся: "{defender_name_before}". '
+                            f'Победил: "{attacker_name}". '
+                            f'Силы: атака {power_pts} против обороны {def_before}. '
+                            f'Остаток {overflow} пошёл в оборону района.'
+                        )
+                        await asyncio.to_thread(add_raw_row, raw_body=raw_body, type_value="battle")
+                    except Exception:
+                        log.exception("Не удалось записать RAW протокол боя (district_id=%s, action_id=%s)",
+                                      district_id, a.id)
                 processed_ids.append(a.id)
 
             defense_pool[district_id] = current_def

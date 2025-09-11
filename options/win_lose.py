@@ -178,7 +178,7 @@ async def _try_resolve_personal_duel(session, cb: types.CallbackQuery, trigger_a
         u = a.owner  # подгружен selectinload'ом
         uname = (u.username or f"user{u.id}") if u else f"user{a.owner_id}"
         mark = "won=True" if a.won_on_point is True else ("won=False" if a.won_on_point is False else "won=None")
-        lines.append(f"/set_district_owner #{trigger_action.district_id} @{uname} -- {mark}")
+        lines.append(f"`/set_district_owner #{trigger_action.district_id} @{uname}` -- {mark}")
 
     body = "Спорный район {} не разрешился:\n{}".format(district_name, "\n".join(lines))
 

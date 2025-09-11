@@ -16,6 +16,9 @@ asyncpg = ">=0.30.0,<0.31.0"
 pydantic = ">=2.11.7,<3.0.0"
 python-dotenv = ">=1.1.1,<2.0.0"
 openpyxl = ">=3.1.0,<4.0.0"
+gspread = "^6.2.1"
+google-auth = "^2.40.3"
+gspread-dataframe = "^4.0.0"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]  # 2.x тоже ок, но 1.8 — стабильный минимум

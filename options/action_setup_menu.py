@@ -1,4 +1,5 @@
 # options/action_setup.py
+import asyncio
 import logging
 from typing import Optional, List
 
@@ -7,10 +8,14 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from utils.ask_and_answer import append_ask_and_answer
+from utils.news_to_print import add_news_to_print
 from .registry import option
 from db.session import get_session
 from db.models import Action, ActionType, User, ActionStatus, District
 from screens.settings_action import SettingsActionScreen
+
+from utils.raw_body_input import add_raw_row
 
 # --- NOTIFY HELPERS -----------------------------------------------------------
 from services.notify import notify_user  # <- как мы делали ранее
@@ -477,6 +482,48 @@ async def action_setup_menu_done(cb: types.CallbackQuery, state, action_id: int,
                         user.scouts_districts.append(district)
 
             await session.commit()
+            try:
+                is_ritual = (action.kind or "").lower() == "ritual"
+                if is_ritual:
+                    u_name = (user.in_game_name or user.username or f"tg:{user.tg_id}").strip()
+                    a_text = (action.text or "").strip()
+                    candles = int(action.candles or 0)
+
+                    raw_body = f"\"{u_name}\" начал ритуал: \"{a_text}\" на \"{candles}\" свечей"
+                    # не заполняем title / created_at / to_send — только raw_body и type
+                    await asyncio.to_thread(add_raw_row, raw_body=raw_body, type_value="ritual.start")
+            except Exception:
+                logging.exception("failed to append ritual RAW news")
+            try:
+                # Для разведки НЕ по району: отправляем вопрос в ask_and_answer
+                is_scout_kind = (action.kind or "").lower().startswith("scout")
+                if is_scout_kind and action.type != ActionType.SCOUT_DISTRICT:
+                    await asyncio.to_thread(
+                        append_ask_and_answer,
+                        username=(user.username or "").strip(),
+                        in_game_name=(user.in_game_name or "").strip(),
+                        question=(action.text or "").strip(),
+                        action_id=action.id,
+                    )
+            except Exception:
+                logging.exception("failed to append ask_and_answer for scout")
+            try:
+                is_communicate = (action.kind or "").lower() == "communicate"
+                if is_communicate:
+                    title = (action.title or "Предложение новости").strip()
+                    body  = (action.text or "").strip()
+                    # отправляем сразу в конвейер (to_send=True)
+                    await asyncio.to_thread(
+                        add_news_to_print,
+                        title=title,
+                        body=body,
+                        action_id=action.id,
+                        spent_info=(action.information or 0),
+                        to_send=False,          # отметим для переноса в news
+                        # created_at=None      # оставим по умолчанию — функция проставит текущее время
+                    )
+            except Exception:
+                logging.exception("failed to append communicate news_to_print")
             try:
                 logging.info("notify watchers started")
                 await _notify_watchers_action_started(session, cb.bot, user, action)
