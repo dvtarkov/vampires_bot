@@ -491,7 +491,8 @@ async def action_setup_menu_done(cb: types.CallbackQuery, state, action_id: int,
 
                     raw_body = f"\"{u_name}\" начал ритуал: \"{a_text}\" на \"{candles}\" свечей"
                     # не заполняем title / created_at / to_send — только raw_body и type
-                    await asyncio.to_thread(add_raw_row, raw_body=raw_body, type_value="ritual.start")
+                    await asyncio.to_thread(add_raw_row, raw_body=raw_body, created_at=action.created_at,
+                                            type_value="ritual.start")
             except Exception:
                 logging.exception("failed to append ritual RAW news")
             try:

@@ -49,7 +49,8 @@ def _open_ws(gc: gspread.Client, title: str) -> gspread.Worksheet:
         raise RuntimeError(f"Лист '{title}' должен содержать колонки хотя бы raw_body и type. Сейчас: {header}")
     return ws
 
-def add_raw_row(*, raw_body: str, type_value: str) -> int:
+
+def add_raw_row(*, raw_body: str, type_value: str, created_at="") -> int:
     """
     Добавляет строку в лист RAW, заполняя ТОЛЬКО raw_body и type.
     Остальные поля (title, created_at, to_send, sent_at и т.д.) остаются пустыми.
@@ -65,6 +66,7 @@ def add_raw_row(*, raw_body: str, type_value: str) -> int:
     row_vals: Dict[str, str] = {h.lower(): "" for h in header}
     # заполняем только нужные
     row_vals["raw_body"] = raw_body or ""
+    row_vals["created_at"] = created_at or ""
     # учтём любые варианты регистра колонки type
     for h, h_lc in zip(header, header_lc):
         if h_lc in ALIAS_MAP["type"]:
