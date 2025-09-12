@@ -46,7 +46,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
+    tg_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
 
     username: Mapped[Optional[str]] = mapped_column(String(255))
     first_name: Mapped[Optional[str]] = mapped_column(String(255))
@@ -147,6 +147,19 @@ class User(Base):
         res = await session.execute(
             update(cls)
             .where(cls.tg_id == tg_id)
+            .values(**kwargs)
+            .execution_options(synchronize_session="fetch")
+        )
+        await session.commit()
+        return (res.rowcount or 0) > 0
+
+    @classmethod
+    async def update_by_username(cls, session, username: str, **kwargs) -> bool:
+        kwargs["updated_at"] = now_utc()
+        print("Updating", username)
+        res = await session.execute(
+            update(cls)
+            .where(cls.username == username)
             .values(**kwargs)
             .execution_options(synchronize_session="fetch")
         )

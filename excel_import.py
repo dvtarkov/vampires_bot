@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, Optional
 
 from openpyxl import load_workbook
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from db.session import get_session
 from db.models import (
@@ -17,6 +17,14 @@ from db.models import (
 
 
 # ---------- утилиты приведения типов ----------
+def _norm_username(v):
+    if not v:
+        return None
+    s = str(v).strip()
+    if s.startswith("@"):
+        s = s[1:]
+    return s or None
+
 
 def _is_empty(v: Any) -> bool:
     if v is None:
@@ -135,30 +143,18 @@ def _iter_rows(ws, want_cols: Iterable[str]) -> Iterable[Dict[str, Any]]:
 # ---------- импорт конкретных сущностей ----------
 
 async def _import_users(ws) -> int:
-    """
-    Upsert по tg_id.
-    Возвращает число обработанных строк.
-    """
-    processed = 0
+    processed = created = updated = 0
     async with get_session() as session:
-        async for _ in _aiter(_iter_rows(ws, (
-            "tg_id","username","first_name","last_name","in_game_name","language_code",
-            "money","influence","information","force",
-            "ideology","faction","available_actions","max_available_actions","actions_refresh_at",
-        ))):
-            pass  # для type-checker =)
-
         for row in _iter_rows(ws, (
             "tg_id","username","first_name","last_name","in_game_name","language_code",
             "money","influence","information","force",
             "ideology","faction","available_actions","max_available_actions","actions_refresh_at",
         )):
-            tg_id = _to_int_or_none(row.get("tg_id"))
-            if tg_id is None:
-                continue  # без tg_id не импортируем
-            # подготовка значений
+            username = _norm_username(_to_str_or_none(row.get("username")))
+            tg_id = _to_int_or_zero(row.get("tg_id"))  # <= ПУСТОЕ -> 0
+
             values = {
-                "username": _to_str_or_none(row.get("username")),
+                "username": username,
                 "first_name": _to_str_or_none(row.get("first_name")),
                 "last_name": _to_str_or_none(row.get("last_name")),
                 "in_game_name": _to_str_or_none(row.get("in_game_name")),
@@ -171,16 +167,40 @@ async def _import_users(ws) -> int:
                 "faction": _to_str_or_none(row.get("faction")),
                 "available_actions": _to_int_or_zero(row.get("available_actions")),
                 "max_available_actions": _to_int_or_zero(row.get("max_available_actions")),
-                # actions_refresh_at — оставляем как есть (строкой не пишем),
-                # т.к. в шаблоне это ISO; если нужно — допиши парсер ISO → datetime.
             }
 
-            existing = (await session.execute(select(User).where(User.tg_id == tg_id))).scalars().first()
-            if existing:
-                await User.update_by_tg_id(session, tg_id, **values)
+            if tg_id > 0:
+                # upsert по положительному tg_id
+                existing = (await session.execute(
+                    select(User).where(User.tg_id == tg_id)
+                )).scalars().first()
+                if existing:
+                    for k, v in values.items():
+                        setattr(existing, k, v)
+                    await session.commit()
+                    updated += 1
+                else:
+                    await User.create(session, tg_id=tg_id, **values)
+                    created += 1
             else:
-                await User.create(session, tg_id=tg_id, **values)
+                # tg_id == 0 -> ВСЕГДА СОЗДАЁМ НОВОГО
+                try:
+                    await User.create(session, tg_id=0, **values)
+                    created += 1
+                except IntegrityError as e:
+                    # если username у тебя UNIQUE — добавим хвост и повторим
+                    if "username" in str(e).lower():
+                        patched = dict(values)
+                        if patched.get("username"):
+                            patched["username"] = f"{patched['username']}__{processed+1}"
+                        await User.create(session, tg_id=0, **patched)
+                        created += 1
+                    else:
+                        raise
+
             processed += 1
+
+    print(f"[Users] processed={processed}, created={created}, updated={updated}")
     return processed
 
 
@@ -345,6 +365,8 @@ async def _import_politicians(ws) -> int:
                 await Politician.create(session, **values)
             processed += 1
     return processed
+
+
 
 
 # ---------- основной вход ----------
