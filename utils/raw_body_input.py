@@ -78,6 +78,7 @@ def add_raw_row(*, raw_body: str, type_value: str, created_at="") -> int:
     ws.append_row(out_row, value_input_option="USER_ENTERED")
     return len(ws.get_all_values())
 
+
 # пример
 if __name__ == "__main__":
     n = add_raw_row(
