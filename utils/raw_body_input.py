@@ -66,7 +66,7 @@ def add_raw_row(*, raw_body: str, type_value: str, created_at="") -> int:
     row_vals: Dict[str, str] = {h.lower(): "" for h in header}
     # заполняем только нужные
     row_vals["raw_body"] = raw_body or ""
-    row_vals["created_at"] = created_at or ""
+    row_vals["created_at"] = str(created_at) or ""
     # учтём любые варианты регистра колонки type
     for h, h_lc in zip(header, header_lc):
         if h_lc in ALIAS_MAP["type"]:
