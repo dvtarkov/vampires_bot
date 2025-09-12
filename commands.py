@@ -56,7 +56,7 @@ COMBAT_RATES_PATH = os.getenv("COMBAT_RATES_PATH", "./config/combat_rates.json")
 
 ATTACK_KIND = "attack"
 DEFENSE_KIND = "defend"
-SCOUT_KINDS = {"scout_dist", "scout_info"}
+SCOUT_KINDS = {"scout_district", "scout_info"}
 
 ORDER_ATTACKS_ASC = True  # порядок атак по created_at
 

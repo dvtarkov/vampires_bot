@@ -388,7 +388,7 @@ class ActionType(PyEnum):
     SUPPORT = "support"
     COLLECTIVE = "collective"
 
-    SCOUT_DISTRICT = "scout_dist"
+    SCOUT_DISTRICT = "scout_district"
     SCOUT_INFO = "scout_info"
 
     RITUAL = "ritual"
