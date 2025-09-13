@@ -56,7 +56,7 @@ COMBAT_RATES_PATH = os.getenv("COMBAT_RATES_PATH", "./config/combat_rates.json")
 
 ATTACK_KIND = "attack"
 DEFENSE_KIND = "defend"
-SCOUT_KINDS = {"scout_district", "scout_info"}
+SCOUT_KINDS = {"scout"}
 
 ORDER_ATTACKS_ASC = True  # порядок атак по created_at
 
@@ -762,7 +762,7 @@ async def close_all_scouting(session: AsyncSession):
         # Закрываем все PENDING scout-экшены
         stmt = select(Action.id).where(
             Action.status == ActionStatus.PENDING,
-            Action.kind.in_(SCOUT_KINDS),
+            Action.type.name == "SCOUT_DISTRICT",
         )
         res = await session.execute(stmt)
         ids = [row for row in res.scalars().all()]
