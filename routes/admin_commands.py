@@ -25,6 +25,7 @@ SCRIPTS = {
     "answers": "send_ask_answers.py",
     "notify": "send_sheet_notifications.py",
     "sync_news": "sync_news_sheets.py",
+    "sync_rituals": "sync_rituals.py",
 }
 
 # Опционально — рабочая директория проекта (чтобы относительные пути резолвились правильно)
@@ -159,5 +160,17 @@ async def admin_sync_news(message: types.Message):
         message,
         title="Синхронизация новостей (news_to_print → news, RAW → news, DONE/notify)",
         script_key="sync_news",
+        timeout=None,
+    )
+
+# =========================
+# 6) /admin_sync_rituals
+# =========================
+@router.message(Command("admin_sync_rituals"))
+async def admin_sync_rituals(message: types.Message):
+    await _run_and_report(
+        message,
+        title="Обработка RESOLVED ритуалов: перевод PENDING → DONE и уведомления",
+        script_key="sync_rituals",
         timeout=None,
     )

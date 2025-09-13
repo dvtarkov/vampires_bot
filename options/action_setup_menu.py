@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from utils.ask_and_answer import append_ask_and_answer
 from utils.news_to_print import add_news_to_print
+from utils.rituals import append_ritual
 from .registry import option
 from db.session import get_session
 from db.models import Action, ActionType, User, ActionStatus, District
@@ -92,6 +93,7 @@ async def _notify_watchers_action_started(session, bot, actor: User, action: Act
         )
         for w in watchers:
             await notify_user(bot, w.tg_id, title=title, body=body)
+
 
 async def _notify_watchers_action_cancelled(session, bot, actor: User, action: Action, reason: str = "отменено"):
     """
@@ -499,6 +501,13 @@ async def action_setup_menu_done(cb: types.CallbackQuery, state, action_id: int,
                     # не заполняем title / created_at / to_send — только raw_body и type
                     await asyncio.to_thread(add_raw_row, raw_body=raw_body, created_at=str(action.created_at),
                                             type_value="ritual.start")
+                    await asyncio.to_thread(append_ritual,
+                                            action_title=action.title,
+                                            action_user_in_game_name=u_name,
+                                            action_text=action.text,
+                                            created_at=action.created_at,
+                                            action_id=action.id
+                                            )
             except Exception:
                 logging.exception("failed to append ritual RAW news")
             try:
@@ -518,7 +527,7 @@ async def action_setup_menu_done(cb: types.CallbackQuery, state, action_id: int,
                 is_communicate = (action.kind or "").lower() == "communicate"
                 if is_communicate:
                     title = (action.title or "Предложение новости").strip()
-                    body  = (action.text or "").strip()
+                    body = (action.text or "").strip()
                     # отправляем сразу в конвейер (to_send=True)
                     await asyncio.to_thread(
                         add_news_to_print,
@@ -526,7 +535,7 @@ async def action_setup_menu_done(cb: types.CallbackQuery, state, action_id: int,
                         body=body,
                         action_id=action.id,
                         spent_info=(action.information or 0),
-                        to_send=False,          # отметим для переноса в news
+                        to_send=False,  # отметим для переноса в news
                         # created_at=None      # оставим по умолчанию — функция проставит текущее время
                     )
             except Exception:
