@@ -32,16 +32,17 @@ def district_list_kb() -> KeyboardSpec:
     )
 
 
-def action_district_list_kb(action) -> KeyboardSpec:
+def action_district_list_kb(action, action_id=None) -> KeyboardSpec:
+    print("ACTION ID: ", action_id)
     return KeyboardSpec(
         type="inline",
         name="action_district_menu",
         options=[["prev", "pick", "next"], ["back"]],
         params=KeyboardParams(max_in_row=2),
         button_params={
-            "prev": {"action": action},
-            "pick": {"action": action},
-            "next": {"action": action},
+            "prev": {"action": action, "action_id": action_id},
+            "pick": {"action": action, "action_id": action_id},
+            "next": {"action": action, "action_id": action_id},
             # "back" — без параметров
         },
     )

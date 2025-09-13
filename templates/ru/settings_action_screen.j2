@@ -9,7 +9,7 @@
 {% macro nonzero(r) -%}{{ (r.force|default(0)) or (r.money|default(0)) or (r.influence|default(0)) or (r.information|default(0)) }}{%- endmacro %}
 
 {% set kind = (action.kind or '')|lower %}
-{% set show_district = kind in ['defend','attack'] %}
+{% set show_district = kind in ['defend','attack', 'ritual'] %}
 {% set show_type = kind in ['defend','attack'] %}
 {% set show_resources_all = kind in ['defend','attack'] %}
 {% set resources_only_info = kind == 'communicate' %}

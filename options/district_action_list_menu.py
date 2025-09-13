@@ -21,20 +21,28 @@ async def action_district_menu_back(cb: types.CallbackQuery, state: FSMContext):
 @option("action_district_menu_next")
 async def action_district_menu_next(cb: types.CallbackQuery, state: FSMContext, **kwargs):
     action_kind = kwargs.get("action")
-    await DistrictActionList().run(message=cb.message, actor=cb.from_user, state=state, move="next", action=action_kind)
+    action_id = kwargs.get("action_id")
+    await DistrictActionList().run(message=cb.message, actor=cb.from_user, state=state, move="next", action=action_kind,
+                                   action_id=action_id)
     await cb.answer()
 
 
 @option("action_district_menu_prev")
 async def action_district_menu_prev(cb: types.CallbackQuery, state: FSMContext, **kwargs):
     action_kind = kwargs.get("action")
-    await DistrictActionList().run(message=cb.message, actor=cb.from_user, state=state, move="prev", action=action_kind)
+    action_id = kwargs.get("action_id")
+    await DistrictActionList().run(message=cb.message, actor=cb.from_user, state=state, move="prev", action=action_kind,
+                                   action_id=action_id)
     await cb.answer()
 
 
 @option("action_district_menu_pick")
 async def action_district_menu_pick(cb: types.CallbackQuery, state: FSMContext, **kwargs):
     action_kind = kwargs.get("action")
+    try:
+        action_id = kwargs.get("action_id")
+    except:
+        pass
     data = await state.get_data()
     idx = int(data.get("district_list_index", 0))
     print("INDEX", idx)
@@ -64,20 +72,35 @@ async def action_district_menu_pick(cb: types.CallbackQuery, state: FSMContext, 
 
         action_type = ActionType.INDIVIDUAL if action_kind in ["defend", "attack"] else ActionType.SCOUT_DISTRICT
         information = 1 if action_kind in ["scout"] else 0
-        action = await Action.create(
-            session,
-            owner_id=user.id,
-            status=ActionStatus.DRAFT,
-            kind=action_kind,
-            title=f"{str(action_kind)} {picked.name}" if district_id else f"{str(action_type.name).title()} (no district)",
-            district_id=district_id,
-            type=action_type,
-            force=0,
-            money=0,
-            influence=0,
-            information=information
-        )
+        if action_kind == "ritual":
+            print("ACTION_ID: ", action_id)
+            async with get_session() as session:
+                a = await Action.get_by_id(session, action_id)
+                if a:
+                    a.district_id = district_id
+                    await session.commit()
+            await SettingsActionScreen().run(
+                message=cb.message,
+                actor=cb.from_user,
+                state=state,
+                action_id=action_id,
+                force_new=True
+            )
+        else:
+            action = await Action.create(
+                session,
+                owner_id=user.id,
+                status=ActionStatus.DRAFT,
+                kind=action_kind,
+                title=f"{str(action_kind)} {picked.name}" if district_id else f"{str(action_type.name).title()} (no district)",
+                district_id=district_id,
+                type=action_type,
+                force=0,
+                money=0,
+                influence=0,
+                information=information
+            )
 
-    await SettingsActionScreen().run(message=cb.message, actor=cb.from_user, state=state, move="prev",
-                                     action_id=action.id, action=action)
+            await SettingsActionScreen().run(message=cb.message, actor=cb.from_user, state=state, move="prev",
+                                             action_id=action.id, action=action)
     await cb.answer()

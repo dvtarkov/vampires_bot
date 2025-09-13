@@ -508,6 +508,7 @@ class Action(Base):
             status: ActionStatus = ActionStatus.PENDING,
             force: int = 0,
             money: int = 0,
+            candles: int = 4,
             influence: int = 0,
             information: int = 0,
             is_positive: bool = True,
@@ -522,6 +523,7 @@ class Action(Base):
             status=status,
             force=force,
             money=money,
+            candles=candles,
             influence=influence,
             information=information,
             is_positive=is_positive

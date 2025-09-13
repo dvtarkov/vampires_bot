@@ -55,7 +55,7 @@ async def _notify_watchers_action_started(session, bot, actor: User, action: Act
 
     if not action.district_id:
         return
-    if (action.kind or "").lower() not in ("defend", "attack"):
+    if (action.kind or "").lower() not in ("defend", "attack", "ritual"):
         return
     if action.status != ActionStatus.PENDING:
         return
@@ -74,18 +74,24 @@ async def _notify_watchers_action_started(session, bot, actor: User, action: Act
     estimate = round(total, -1)
 
     who = actor.in_game_name or actor.username or f"#{actor.tg_id}"
-    title = "🔔 Действие на районе"
+    title = f"🔔 Действие на районе {action.district.name}"
 
-    extra = "\nПротивник атакует район лично." if getattr(action, "on_point", False) else ""
+    extra = "\nЛично присутствует на районе." if getattr(action, "on_point", False) else ""
 
-    body = (
-        f"{who} начал(а) «{(action.kind or '').capitalize()}»"
-        f"{f' — {action.title}' if action.title else ''}.\n"
-        f"Оценка ресурсов: около {estimate}{extra}"
-    )
-    for w in watchers:
-        await notify_user(bot, w.tg_id, title=title, body=body)
-
+    if not (action.kind or "").lower() == "ritual":
+        body = (
+            f"{who} начал(а) «{(action.kind or '').capitalize()}»"
+            f"{f' — {action.title}' if action.title else ''}.\n"
+            f"Оценка ресурсов: около {estimate}{extra}"
+        )
+        for w in watchers:
+            await notify_user(bot, w.tg_id, title=title, body=body)
+    else:
+        body = (
+            f"{who} начал(а) Ритуал в этом районе!"
+        )
+        for w in watchers:
+            await notify_user(bot, w.tg_id, title=title, body=body)
 
 async def _notify_watchers_action_cancelled(session, bot, actor: User, action: Action, reason: str = "отменено"):
     """
@@ -491,7 +497,7 @@ async def action_setup_menu_done(cb: types.CallbackQuery, state, action_id: int,
 
                     raw_body = f"\"{u_name}\" начал ритуал: \"{a_text}\" на \"{candles}\" свечей"
                     # не заполняем title / created_at / to_send — только raw_body и type
-                    await asyncio.to_thread(add_raw_row, raw_body=raw_body, created_at=action.created_at,
+                    await asyncio.to_thread(add_raw_row, raw_body=raw_body, created_at=str(action.created_at),
                                             type_value="ritual.start")
             except Exception:
                 logging.exception("failed to append ritual RAW news")

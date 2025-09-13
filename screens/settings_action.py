@@ -39,7 +39,7 @@ class DistrictActionList(BaseScreen):
         **kwargs
     ):
         action = kwargs.get("action")
-
+        action_id = kwargs.get("action_id")
         tg_id = actor.id if actor else message.from_user.id
         logging.info("DistrictList for tg_id=%s", tg_id)
 
@@ -114,7 +114,7 @@ class DistrictActionList(BaseScreen):
             "district": district,
             "info": info,
             "politicians": politicians,
-            "keyboard": action_district_list_kb(action)
+            "keyboard": action_district_list_kb(action, action_id)
         }
 
 
@@ -314,7 +314,7 @@ class SettingsActionScreen(BaseScreen):
                         "money": action_obj.money,
                         "influence": action_obj.influence,
                         "information": action_obj.information,
-                        "candles": getattr(action_obj, "candles", 0),
+                        "candles": getattr(action_obj, "candles", 4),
                     },
                     "support": support,
                     "ui": {

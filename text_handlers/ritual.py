@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 
 from db.session import get_session
 from db.models import User, Action, ActionStatus, ActionType
-from screens.settings_action import SettingsActionScreen
+from screens.settings_action import SettingsActionScreen, DistrictActionList
 from screens.communicate_screen import CommunicateScreen
 from states.ritual import Ritual
 from text_handlers import text_handler
@@ -42,8 +42,10 @@ async def handle_ritual_info(message: Message, state: FSMContext):
                 district_id=None,
                 type=ActionType.INDIVIDUAL,
                 status=ActionStatus.DRAFT,
-                force=0, money=0, influence=0, information=0
+                force=0, money=0, influence=0, information=0,
+                candles=4
             )
+
             # обновим текст (если нет .text в create)
             await session.refresh(action)
             await session.execute(
@@ -54,13 +56,9 @@ async def handle_ritual_info(message: Message, state: FSMContext):
             await session.commit()
 
         # показываем экран настройки заявки (там можно выставить расход информации и нажать Done)
-        await SettingsActionScreen().run(
-            message=message,
-            actor=message.from_user,
-            state=state,
-            action_id=action.id,
-            force_new=True
-        )
+
+        await DistrictActionList().run(message=message, actor=message.from_user, state=state, move=None,
+                                       action="ritual", action_id=action.id, force_new=True)
 
     except Exception as e:
         logging.exception("Ritual input failed")

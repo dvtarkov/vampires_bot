@@ -42,8 +42,8 @@ async def actions_menu_communicate(cb: types.CallbackQuery, state: FSMContext):
 
 
 @option("actions_menu_ritual")
-async def actions_menu_communicate(cb: types.CallbackQuery, state: FSMContext):
-    await RitualScreen().run(message=cb.message, action="scout", state=state)
+async def actions_menu_ritual(cb: types.CallbackQuery, state: FSMContext):
+    await RitualScreen().run(message=cb.message, action="ritual", state=state)
     await cb.answer()
 
 
